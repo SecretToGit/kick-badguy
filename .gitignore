@@ -1,0 +1,8 @@
+# 三张真人照片的 Base64（各占几十 KB）不进仓库
+faces/
+
+# 发布用的临时输出目录，内容就是 index.html 的副本
+dist/
+
+# Qoder 本地站点绑定文件（里面是发布快照 ZIP，不是项目源码）
+*.qoder.site

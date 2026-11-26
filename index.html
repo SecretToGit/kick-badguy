@@ -1,0 +1,2755 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<!-- viewport-fit=cover：不让位给刘海和底部横条的话，摇杆会被 iPhone 那根 home 条压掉半截，
+     所以让画面铺满屏幕，再用 CSS 里的 env(safe-area-inset-*) 把可点的东西往里挪。 -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#0b0d12" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<title>踹飞坏人 · 他会给你递钱</title>
+<style>
+  :root{
+    --bg:#0b0d12;
+    --ink:#e9edf5;
+    --muted:#9aa4b8;
+    --green:#07c160;
+    --gold:#ffd166;
+    --danger:#ff5d5d;
+    --card:rgba(16,20,28,.72);
+    --line:rgba(255,255,255,.10);
+    --shadow:0 18px 50px rgba(0,0,0,.55);
+    /* 刘海 / 圆角 / 底部横条。桌面浏览器这四个值全是 0，所以同一套写法两边都对。 */
+    --sa-t:env(safe-area-inset-top,0px);
+    --sa-b:env(safe-area-inset-bottom,0px);
+    --sa-l:env(safe-area-inset-left,0px);
+    --sa-r:env(safe-area-inset-right,0px);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
+    font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC",system-ui,-apple-system,"Segoe UI",sans-serif;
+    -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;
+    /* overscroll-behavior：手机上手指拖到边缘不让浏览器整页回弹，不然转视角转到一半把页面也晃走了 */
+    overscroll-behavior:none;touch-action:manipulation}
+  /* canvas 要单独把 touch-action 关掉：manipulation 仍然允许浏览器"拖动=平移页面"，
+     手机上转视角转到一半会被判成平移，浏览器直接发 pointercancel 把这根手指收走，
+     摇杆和镜头都会突然卡住。none = 所有手势交给 JS，配合下面的 callout 屏蔽长按菜单。 */
+  canvas{display:block;touch-action:none;-webkit-touch-callout:none}
+  #game{position:fixed;inset:0}
+  #vignette{position:fixed;inset:0;pointer-events:none;
+    background:radial-gradient(120% 85% at 50% 45%,transparent 45%,rgba(0,0,0,.55) 100%);
+    mix-blend-mode:multiply}
+  #flash{position:fixed;inset:0;pointer-events:none;background:#fff;opacity:0;transition:opacity .12s}
+  .hidden{display:none !important}
+
+  /* ---------- HUD ---------- */
+  #hud{position:fixed;inset:0;pointer-events:none}
+  .hud-top{position:absolute;top:calc(14px + var(--sa-t));left:calc(14px + var(--sa-l));display:flex;gap:12px;align-items:flex-start}
+  .money-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px 16px;
+    backdrop-filter:blur(10px);box-shadow:var(--shadow);min-width:170px}
+  .money-label{font-size:11px;letter-spacing:.14em;color:var(--muted)}
+  .money-value{font-size:28px;font-weight:800;color:var(--gold);font-variant-numeric:tabular-nums;line-height:1.15;
+    text-shadow:0 2px 12px rgba(255,209,102,.25)}
+  .money-sub{font-size:11px;color:var(--muted);margin-top:2px}
+  .combo{margin-top:6px;background:linear-gradient(180deg,rgba(255,93,93,.9),rgba(200,40,40,.9));
+    border-radius:12px;padding:8px 14px;text-align:center;box-shadow:var(--shadow);animation:pop .18s ease-out}
+  .combo b{display:block;font-size:22px;line-height:1}
+  .combo span{font-size:10px;opacity:.85;letter-spacing:.2em}
+  @keyframes pop{from{transform:scale(.6);opacity:0}to{transform:scale(1);opacity:1}}
+
+  #targetBar{position:absolute;top:calc(14px + var(--sa-t));left:50%;transform:translateX(-50%);width:min(420px,80vw);
+    background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 12px;backdrop-filter:blur(10px)}
+  #targetBar .row{display:flex;justify-content:space-between;align-items:center;font-size:12px;margin-bottom:6px}
+  #targetBar .name{font-weight:700}
+  #targetBar .wallet{color:var(--gold);font-variant-numeric:tabular-nums}
+  .hp{height:8px;border-radius:99px;background:rgba(255,255,255,.12);overflow:hidden}
+  .hp i{display:block;height:100%;width:100%;border-radius:99px;
+    background:linear-gradient(90deg,#ff7a7a,#ff2d55);transition:width .18s}
+  .hint{position:absolute;left:50%;bottom:calc(78px + var(--sa-b));transform:translateX(-50%);font-size:12px;color:var(--muted);
+    background:rgba(0,0,0,.35);padding:6px 12px;border-radius:99px;border:1px solid var(--line);max-width:92vw;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  #toolbar{position:fixed;top:calc(14px + var(--sa-t));right:calc(14px + var(--sa-r));display:flex;flex-direction:column;gap:8px;align-items:flex-end;z-index:40}
+  #toolbar button,.btn{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:10px;
+    padding:8px 12px;font-size:13px;cursor:pointer;backdrop-filter:blur(10px);transition:.15s;font-family:inherit}
+  #toolbar button:hover,.btn:hover{background:rgba(255,255,255,.14);transform:translateY(-1px)}
+  .btn.primary{background:linear-gradient(180deg,#12d673,#07a95a);border-color:transparent;color:#04220f;font-weight:800}
+
+  /* ---------- Panels ---------- */
+  .panel{position:fixed;z-index:60;background:rgba(12,15,21,.94);border:1px solid var(--line);border-radius:16px;
+    box-shadow:var(--shadow);padding:16px;width:min(340px,92vw);max-height:86vh;overflow:auto;backdrop-filter:blur(14px)}
+  #facePanel{top:calc(64px + var(--sa-t));right:calc(14px + var(--sa-r))}
+  .panel h3{margin:0 0 4px;font-size:15px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+  /* 手机上没有 Esc 键，横屏时面板又是贴着右上方的抽屉，会把工具栏整个盖住。
+     没有这个 ✕ 的话面板就只能开着，关都关不掉。 */
+  .panel h3 .x{background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:8px;
+    width:34px;height:34px;font-size:16px;line-height:1;cursor:pointer;font-family:inherit;flex:0 0 auto}
+  .panel h3 .x:active{background:rgba(255,255,255,.14);color:var(--ink)}
+  .panel p.tip{margin:0 0 12px;font-size:11px;color:var(--muted);line-height:1.6}
+  /* 出演名单：圆头像 + 名字 + 身份。名字和照片都在代码里写死了，
+     所以这里只需要"看得见"，不需要任何输入控件。 */
+  .cast{display:flex;flex-direction:column;gap:10px;margin-bottom:12px}
+  .cast .who{display:flex;gap:10px;align-items:center}
+  .cast img{width:52px;height:52px;border-radius:50%;object-fit:cover;border:2px solid var(--line);background:#222;flex:0 0 auto}
+  .cast .n{font-size:13px;color:var(--ink);font-weight:700}
+  .cast .r{font-size:11px;color:var(--muted);margin-top:2px}
+  /* 右边那枚小锁标签：明确告诉玩家"这块改不了"，省得满面板找输入框 */
+  .cast .lock{margin-left:auto;font-size:10px;color:var(--muted);border:1px solid var(--line);
+    border-radius:99px;padding:3px 8px;white-space:nowrap}
+
+  /* ---------- 假收款弹窗 ---------- */
+  #payPopup{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%) scale(.9);z-index:70;
+    width:min(320px,88vw);border-radius:18px;overflow:hidden;box-shadow:0 30px 90px rgba(0,0,0,.7);
+    background:#f2f2f7;color:#111;opacity:0;pointer-events:none;transition:.22s cubic-bezier(.2,1.2,.3,1)}
+  #payPopup.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
+  #payPopup .head{background:var(--green);color:#fff;padding:16px 18px;display:flex;align-items:center;gap:12px}
+  #payPopup .head img{width:44px;height:44px;border-radius:8px;object-fit:cover;background:#cfd6df}
+  #payPopup .head .t{font-size:15px;font-weight:700}
+  #payPopup .head .s{font-size:12px;opacity:.9}
+  #payPopup .body{padding:20px 18px 22px;text-align:center}
+  #payPopup .amount{font-size:38px;font-weight:900;color:#111;font-variant-numeric:tabular-nums}
+  #payPopup .amount small{font-size:20px}
+  #payPopup .from{font-size:13px;color:#666;margin-top:6px}
+  #payPopup .note{font-size:12px;color:#8a8a8e;margin-top:14px;border-top:1px solid #e3e3e8;padding-top:10px}
+
+  /* ---------- 启动页 ---------- */
+  #start{position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(80% 80% at 50% 30%,#1b2333,#07090d 70%);padding:20px}
+  #start .box{width:min(560px,94vw);text-align:center}
+  #start h1{font-size:clamp(26px,5.2vw,42px);margin:0 0 6px;letter-spacing:.02em}
+  #start h1 span{color:var(--gold)}
+  #start .sub{color:var(--muted);font-size:14px;line-height:1.8;margin-bottom:18px}
+  #start .keys{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:0 0 18px;text-align:left}
+  #start .keys div{background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12px;color:#c8d2e4}
+  #start .keys b{color:#fff;font-family:ui-monospace,Consolas,monospace}
+  #start .castline{font-size:13px;color:#c8d2e4;line-height:1.9;margin:0 auto 16px;max-width:420px}
+  #start .castline b{color:#fff}
+  #start .castline span{color:var(--gold)}
+  #start .fine{font-size:11px;color:#6f7b90;margin-top:16px;line-height:1.7}
+  .bigbtn{font-size:16px;padding:12px 26px;border-radius:12px}
+
+  #loading{position:fixed;inset:0;z-index:90;display:flex;align-items:center;justify-content:center;
+    background:#07090d;font-size:14px;color:var(--muted);text-align:center;padding:24px;line-height:1.8}
+  #loading .sp{width:26px;height:26px;border:2px solid rgba(255,255,255,.2);border-top-color:var(--green);
+    border-radius:50%;margin:0 auto 12px;animation:sp .8s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+
+  /* ---------- 触屏 ---------- */
+  #touch{position:fixed;inset:auto 0 0 0;height:34vh;z-index:20;pointer-events:none}
+  /* 摇杆本体是纯视觉（pointer-events:none）：手指落在左下区域时由 canvas 的指针处理
+     把这个圈搬到按下的位置，所以固定圈和浮动圈不用两套代码，也不会互相抢事件。 */
+  /* 用 fixed 而不是 absolute：浮动摇杆拿到的坐标是手指的视口坐标，
+     挂在 #touch 那块 34vh 高的容器里再写 top，会多减掉一个容器自身的偏移，圈就跑偏了。 */
+  #stick{position:fixed;left:calc(24px + var(--sa-l));bottom:calc(24px + var(--sa-b));width:120px;height:120px;border-radius:50%;
+    background:rgba(255,255,255,.06);border:1px solid var(--line);pointer-events:none;touch-action:none;
+    transition:background .15s,border-color .15s}
+  #stick i{position:absolute;left:50%;top:50%;width:52px;height:52px;margin:-26px 0 0 -26px;border-radius:50%;
+    background:rgba(255,255,255,.22)}
+  #stick.float{background:rgba(255,255,255,.13);border-color:rgba(255,255,255,.34)}
+  #stick.float i{background:rgba(255,255,255,.4)}
+  #touch .kb{position:absolute;right:calc(24px + var(--sa-r));bottom:calc(24px + var(--sa-b));display:flex;gap:12px;
+    align-items:flex-end;pointer-events:auto;touch-action:none}
+  #touch .kb button{width:84px;height:84px;border-radius:50%;border:1px solid var(--line);
+    background:rgba(255,93,93,.22);color:#fff;font-size:15px;font-weight:800;font-family:inherit}
+  #touch .kb button.alt{background:rgba(255,209,102,.18);width:62px;height:62px;font-size:13px}
+  #touch .kb button:active{transform:scale(.94);background:rgba(255,93,93,.42)}
+
+  /* ---------- 精致化收尾：分区标题 / 焦点 / 按压反馈 / 滚动条 ---------- */
+  /* 面板分区标题：细线 + 字距拉开，一眼看出"这块管什么" */
+  .sec{display:flex;align-items:center;gap:10px;margin:16px 0 9px;font-size:11px;letter-spacing:.16em;
+    color:#7f8ba1;text-transform:uppercase}
+  .sec::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,var(--line),transparent)}
+  .sec:first-of-type{margin-top:4px}
+  /* 键盘操作时能看清焦点在哪个按钮上（鼠标点不动画，避免到处套蓝框） */
+  button:focus-visible,input:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+  /* 按下去要有"按到了"的手感：回弹 + 内阴影 */
+  #toolbar button:active,.btn:active{transform:translateY(1px);box-shadow:inset 0 2px 6px rgba(0,0,0,.45)}
+  .btn.primary{box-shadow:0 6px 18px rgba(7,193,96,.28)}
+  .btn.primary:active{box-shadow:inset 0 2px 8px rgba(0,0,0,.35)}
+  /* 面板滚动条：默认那条又粗又亮，会把整个面板的质感拉低 */
+  .panel::-webkit-scrollbar{width:8px}
+  .panel::-webkit-scrollbar-track{background:transparent}
+  .panel::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:99px}
+  .panel::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.26)}
+  /* 金额卡：顶部一条高光和右下角的"入金"角标，让它像张卡片而不是一块半透明矩形 */
+  .money-card{position:relative;overflow:hidden}
+  .money-card::before{content:'';position:absolute;inset:0 0 auto 0;height:1px;
+    background:linear-gradient(90deg,transparent,rgba(255,209,102,.55),transparent)}
+  .money-card .coin{position:absolute;right:12px;top:12px;width:22px;height:22px;border-radius:50%;
+    background:radial-gradient(circle at 34% 30%,#fff2c2,#f0b64a 62%,#c98a20);
+    box-shadow:0 2px 8px rgba(0,0,0,.45);display:grid;place-items:center;font-size:12px;color:#7a5410;font-weight:900}
+  /* 收款弹窗：更像"到账通知"——绿色标题栏带勾、金额上方一条分割线 */
+  #payPopup .head{position:relative;background:linear-gradient(180deg,#08cc68,#06a955)}
+  #payPopup .head::after{content:'✓';position:absolute;right:14px;top:50%;transform:translateY(-50%);
+    width:24px;height:24px;border-radius:50%;background:rgba(255,255,255,.22);color:#fff;
+    display:grid;place-items:center;font-size:14px;font-weight:900}
+  #payPopup .body::before{content:'';display:block;height:1px;margin:0 0 16px;
+    background:linear-gradient(90deg,transparent,#d3d3da,transparent)}
+  #payPopup .amount{letter-spacing:-.02em}
+  /* ---------- 手机 / 平板 ---------- */
+  /* 判据放在 JS 里算好后写成 <html class="touch">，而不是直接写 @media (pointer:coarse)：
+     1) 有些安卓平板接了鼠标、或者浏览器把 pointer 报错，media query 一失效整套大按钮就全没了；
+     2) 判据要和 JS 里的 isTouch（控制摇杆、提示语、性能降级）完全一致，不然会出现
+        "界面是手机版、操作还是鼠标版"这种分裂；
+     3) class 是可以在测试里直接断言的，media query 在本机测不到。
+     兜底条件保持原样：窄窗口（<=620px）里的桌面浏览器也走这套紧凑排版。 */
+  .touch .hud-top{top:calc(10px + var(--sa-t));left:calc(10px + var(--sa-l))}
+  /* 金额卡缩成一条，给顶栏腾出放按钮的地方 */
+  .touch .money-card{min-width:0;padding:6px 10px;border-radius:11px}
+  .touch .money-label{font-size:9px;letter-spacing:.1em}
+  .touch .money-value{font-size:18px}
+  .touch .money-sub{font-size:9px}
+  .touch .money-card .coin{width:16px;height:16px;top:8px;right:8px;font-size:9px}
+  .touch .combo{padding:5px 10px;border-radius:9px}
+  .touch .combo b{font-size:16px}
+  /* 顶栏改成横排纯图标，贴在右上角 */
+  .touch #toolbar{top:calc(10px + var(--sa-t));right:calc(10px + var(--sa-r));flex-direction:row;gap:6px}
+  .touch #toolbar button span{display:none}
+  .touch #toolbar button{padding:8px;border-radius:11px;font-size:17px;line-height:1;min-width:38px}
+  /* 目标条挪到第二行，整条铺满，省得和左右两块打架。
+     80px 不是拍脑袋：金额卡顶到 10+61=71，往下再留 9px 呼吸，否则左端会压在金额卡下沿上。 */
+  .touch #targetBar{top:calc(80px + var(--sa-t));width:auto;left:calc(10px + var(--sa-l));right:calc(10px + var(--sa-r));
+    transform:none;padding:7px 10px}
+  .touch #targetBar .row{font-size:11px;margin-bottom:5px}
+  .touch .hint{bottom:calc(158px + var(--sa-b));font-size:11px;padding:5px 10px}
+  /* 面板改成底部抽屉：手机上没有"右上角 340px 侧栏"这种位置，横屏时更是直接把画面盖死 */
+  .touch .panel{left:0;right:0;bottom:0;width:100%;max-height:76vh;
+    border-radius:20px 20px 0 0;border-left:none;border-right:none;border-bottom:none;
+    padding:14px 16px calc(16px + var(--sa-b))}
+  /* top:auto 必须带上 id 才能压过 #facePanel{top:64px}：类选择器权重低于 id。
+     横屏那条要同样带 id，且写在后面，靠顺序赢同权重的这条。 */
+  .touch #facePanel{top:auto}
+  .touch .panel h3{font-size:15px}
+  .touch .btn{padding:11px 13px;font-size:14px}
+  /* 启动页：小屏内容比屏幕高，必须能滚，而且不能居中（居中的东西一滚动顶部就够不着） */
+  .touch #start{align-items:flex-start;overflow:auto;padding:calc(18px + var(--sa-t)) 16px calc(18px + var(--sa-b))}
+  .touch #start h1{font-size:24px}
+  .touch #start .sub{font-size:13px;margin-bottom:14px}
+  .touch #start .keys{grid-template-columns:1fr;gap:6px}
+  .touch #start .keys div{font-size:12px;padding:9px 11px}
+  .touch #start .castline{max-width:none}
+  .touch #start .bigbtn,.touch .bigbtn{padding:14px 22px;font-size:17px}
+  .touch #payPopup{width:min(320px,92vw)}
+  /* 横屏手机：可用高度只有 390px 左右，摇杆和按钮要收小，提示条让位 */
+  .touch.land #stick{width:104px;height:104px;left:calc(14px + var(--sa-l));bottom:calc(12px + var(--sa-b))}
+  .touch.land #stick i{width:46px;height:46px;margin:-23px 0 0 -23px}
+  .touch.land #touch .kb{right:calc(14px + var(--sa-r));bottom:calc(12px + var(--sa-b));gap:10px}
+  .touch.land #touch .kb button{width:70px;height:70px;font-size:14px}
+  .touch.land #touch .kb button.alt{width:54px;height:54px}
+  /* 横屏可用高度只有 390 左右：提示条从底部让开，挪到目标条下面（条到 124，再留 6px） */
+  .touch.land .hint{bottom:auto;top:calc(130px + var(--sa-t));font-size:11px}
+  /* 横屏高度太矮，底部抽屉会把整个画面吃掉，改回右侧抽屉；
+     顶部给工具栏留出 54px，不然 ✕ 之外就没法关面板了（面板自己也有 ✕，双保险）。 */
+  .touch.land .panel{max-height:none;width:min(330px,46%);left:auto;right:0;bottom:0;
+    border-radius:20px 0 0 20px;padding:14px 16px calc(16px + var(--sa-b));border-right:none;border-top:none}
+  .touch.land #facePanel{top:calc(54px + var(--sa-t))}
+  @media (prefers-reduced-motion:reduce){
+    #payPopup,.combo,.btn,#toolbar button{transition:none;animation:none}
+  }
+</style>
+<script>
+  // 这段是普通 <script>，故意放在 <head> 里最早执行：
+  // 手机版界面靠 <html> 上的 class 开关，如果等到下面的 module 跑起来再补，
+  // three.js 还在下载的那一两秒里启动页会先按桌面排版画一帧，然后"啪"地跳成手机版。
+  // isTouch 的判据也在这里一次算清，挂到 window.__isTouch 给 module 读，两边不会说法不一。
+  (function () {
+    var coarse = false;
+    try { coarse = matchMedia('(pointer:coarse)').matches; } catch (e) {}
+    // ?touch=1 是留给调试和自测的开关：电脑上也能把手机版界面完整跑一遍。
+    window.__isTouch = coarse || /[?&]touch=1\b/.test(location.search);
+    var cl = document.documentElement.classList;
+    cl.toggle('touch', window.__isTouch || innerWidth <= 620);
+    cl.toggle('land', window.__isTouch && innerWidth > innerHeight && innerHeight <= 520);
+  })();
+</script>
+</head>
+<body>
+<div id="game"></div>
+<div id="vignette"></div>
+<div id="flash"></div>
+
+<div id="hud" class="hidden">
+  <div class="hud-top">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div class="money-card">
+        <div class="coin">¥</div>
+        <div class="money-label">今日收款</div>
+        <div class="money-value">¥ <span id="moneyValue">0.00</span></div>
+        <div class="money-sub"><span id="koCount">0</span> 个坏人跪地递钱</div>
+      </div>
+      <div id="combo" class="combo hidden"><b id="comboNum">0</b><span>COMBO</span></div>
+    </div>
+  </div>
+  <div id="targetBar" class="hidden">
+    <div class="row"><span class="name" id="tgtName">坏人</span><span class="wallet">钱包 ¥<b id="tgtWallet">0</b></span></div>
+    <div class="hp"><i id="tgtHp"></i></div>
+  </div>
+  <div class="hint" id="hint">移动鼠标 转镜头 · 左键 正踹 · 右键 回旋踢 · WASD 走位</div>
+</div>
+
+<div id="toolbar" class="hidden">
+  <!-- 文字包在 span 里：手机上 CSS 只留图标，四个按钮缩成一小排，不然顶栏会被挤成一团 -->
+  <button id="btnFace" title="本场角色">🎭 <span>本场角色</span></button>
+  <button id="btnShot" title="整蛊截图">📸 <span>整蛊截图</span></button>
+  <button id="btnPay" title="手动收款">💰 <span>手动收款</span></button>
+  <button id="btnFull" title="全屏">⛶ <span>全屏</span></button>
+</div>
+
+<div id="facePanel" class="panel hidden">
+  <h3>本场角色 <button class="x" id="btnCloseFace" title="关闭">✕</button></h3>
+  <p class="tip">名字和脸都写死在代码里，游戏里没有改的入口。整蛊归整蛊，这类内容请先征得本人同意，别拿去网暴别人。</p>
+  <div class="sec">出演</div>
+  <div class="cast">
+    <div class="who"><img id="castMe" alt="" /><div><div class="n">主角</div><div class="r">主角 · 用脚讲道理</div></div><span class="lock">固定</span></div>
+    <div class="who"><img id="castA" alt="" /><div><div class="n">坏人A（下头男）</div><div class="r">坏人 · 开局站左边</div></div><span class="lock">固定</span></div>
+    <div class="who"><img id="castB" alt="" /><div><div class="n">坏人B（出生）</div><div class="r">坏人 · 开局站右边</div></div><span class="lock">固定</span></div>
+  </div>
+  <div class="sec">玩法</div>
+  <p class="tip">踹到跪地递钱为止。挨一脚他会先抱头乱窜，跑起来还会从兜里掉钱；两个坏人都只嘴硬、不还手。</p>
+</div>
+
+<div id="payPopup">
+  <div class="head">
+    <img id="payAvatar" alt="" />
+    <div>
+      <div class="t">收款到账</div>
+      <div class="s" id="payTime">刚刚</div>
+    </div>
+  </div>
+  <div class="body">
+    <div class="amount"><small>¥</small><span id="payAmount">0.00</span></div>
+    <div class="from">来自：<span id="payFrom">坏人</span></div>
+    <div class="note">备注：<span id="payNote">被踹服了，自愿赔偿</span></div>
+  </div>
+</div>
+
+<div id="start">
+  <div class="box">
+    <h1>踹飞<span>坏人</span>，他会给你递钱</h1>
+    <div class="sub">第三人称 3D 室内整蛊小游戏 · 固定三位演员，进场就能踢</div>
+    <div class="keys" id="startKeys">
+      <div><b>移动鼠标</b> 转镜头（光标自动隐藏）</div>
+      <div><b>鼠标左键</b> 正踹 · <b>右键</b> 回旋踢</div>
+      <div><b>W A S D</b> 走位 · <b>Shift</b> 冲刺</div>
+      <div><b>滚轮</b> 拉近拉远 · <b>Esc</b> 松开鼠标去点顶部按钮</div>
+      <div><b>空格 / J · K</b> 键盘党备用键</div>
+      <div><b>F</b> 怼脸特写</div>
+      <div><b>挨一脚</b> 坏人会抱头乱窜，跑起来还会从兜里掉钱</div>
+    </div>
+    <div class="castline">
+      主角 <b>主角</b>（就是你） · 坏人 <span>坏人A（下头男）</span> 开局站左边、<span>坏人B（出生）</span> 站右边<br>
+      名字和照片都是固定的，不用填、也改不了
+    </div>
+    <button class="btn primary bigbtn" id="btnStart">进入游戏</button>
+    <div class="fine">卡通化的夸张演出，没有血腥画面。请用于朋友之间的玩笑，别拿去网暴别人。<br>首次进入需要联网加载 3D 引擎（three.js CDN）。浏览器不允许隐藏光标时，会自动退回"按住拖动转视角、点一下出脚"。</div>
+  </div>
+</div>
+
+<div id="loading"><div><div class="sp"></div>正在加载 3D 引擎 three.js …<br><span id="loadDetail" style="font-size:12px;opacity:.7">unpkg</span></div></div>
+
+<div id="touch" class="hidden">
+  <div id="stick"><i></i></div>
+  <div class="kb">
+    <button class="alt" id="tSpin">回旋</button>
+    <button id="tKick">踹！</button>
+  </div>
+</div>
+
+<script type="module">
+/* =========================================================================
+   踹飞坏人 · 他会给你递钱
+   单文件 3D 整蛊小游戏（three.js + 程序化建模/动画，无任何外部素材）
+   结构：
+     1. 引擎加载      2. 工具函数     3. 音效（WebAudio 合成）
+     4. 程序化贴图    5. 人偶骨架     6. 场景/房间
+     7. 姿势动画系统  8. 玩家控制+踢击 9. 坏人 AI + 递钱
+    10. 钞票/粒子     11. 摄像机      12. UI（贴脸、收款、截图）
+   ========================================================================= */
+
+// ---------------------------------------------------------------- 1. 引擎
+const CDN = [
+  'https://unpkg.com/three@0.160.0/build/three.module.js',
+  'https://registry.npmmirror.com/three/0.160.0/files/build/three.module.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.module.min.js',
+];
+let THREE = null;
+for (let i = 0; i < CDN.length; i++) {
+  document.getElementById('loadDetail').textContent = new URL(CDN[i]).host;
+  try { THREE = await import(CDN[i]); break; } catch (e) { /* 换下一个源 */ }
+}
+if (!THREE) {
+  document.getElementById('loading').innerHTML =
+    '<div>3D 引擎加载失败。<br><span style="font-size:12px;opacity:.7">请检查网络，或把本文件放到本地 http 服务器里打开。</span></div>';
+  throw new Error('three.js load failed');
+}
+document.getElementById('loading').classList.add('hidden');
+
+// ---------------------------------------------------------------- 2. 工具
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const damp = (a, b, l, dt) => lerp(a, b, 1 - Math.exp(-l * dt));
+// 角度版阻尼：先把差值折到 (-π, π]，永远走短的那边。
+// 直接用 damp 插两个角度，在 ±π 交界处会绕一整圈，角色会原地多转 360°。
+const dampAngle = (a, b, l, dt) => {
+  let d = (b - a) % (Math.PI * 2);
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return a + d * (1 - Math.exp(-l * dt));
+};
+const rand = (a, b) => a + Math.random() * (b - a);
+const randi = (a, b) => Math.floor(rand(a, b + 1));
+const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+const smooth = t => t * t * (3 - 2 * t);
+const $ = id => document.getElementById(id);
+// 触屏判据统一在 <head> 里那段早期 script 算好：CSS 的手机版排版靠它写的 class，
+// 这里再算一遍会出现"界面是手机版、操作是鼠标版"的分裂，所以只读 window.__isTouch。
+// ?touch=1 也在那边支持：电脑上加这个参数就能把手机方案整套跑一遍（摇杆、抽屉、竖屏 FOV）。
+const isTouch = window.__isTouch === true;
+// 竖屏判定：宽高比小于 1 才需要放宽视角，否则第三人称会把坏人怼成一整屏
+const isPortrait = () => innerHeight > innerWidth * 1.12;
+// 手机版界面的两个开关写在 <html> 的 class 上：touch = 触屏或窄窗口，land = 横屏矮屏。
+// 不用 @media(pointer:coarse) 是因为那条在某些安卓浏览器上会报错，而 JS 这条判据可控。
+function syncUiClass() {
+  const cl = document.documentElement.classList;
+  const t = isTouch || innerWidth <= 620;
+  cl.toggle('touch', t);
+  cl.toggle('land', t && innerWidth > innerHeight && innerHeight <= 520);
+}
+
+// 以前这里有个 store（localStorage 存档），用来记住上传的照片和自定义名字。
+// 现在演员表写死、页面上没有任何可保存的输入，存档就没有意义了，整段删掉。
+
+// ---------------------------------------------------------------- 3. 音效
+const Sound = {
+  ctx: null, on: true,
+  init() { if (!this.ctx) { try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); },
+  noiseBuf: null,
+  noise(dur = 0.3) {
+    const c = this.ctx, n = Math.floor(c.sampleRate * dur), b = c.createBuffer(1, n, c.sampleRate), d = b.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+    const s = c.createBufferSource(); s.buffer = b; return s;
+  },
+  env(node, gain, dur, attack = 0.005) {
+    const c = this.ctx, g = c.createGain();
+    g.gain.setValueAtTime(0, c.currentTime);
+    g.gain.linearRampToValueAtTime(gain, c.currentTime + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + dur);
+    node.connect(g); g.connect(c.destination); return g;
+  },
+  tone(freq, dur, gain = 0.2, type = 'sine', slide = 0) {
+    if (!this.ctx || !this.on) return;
+    const o = this.ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(freq, this.ctx.currentTime);
+    if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, freq + slide), this.ctx.currentTime + dur);
+    this.env(o, gain, dur); o.start(); o.stop(this.ctx.currentTime + dur + 0.02);
+  },
+  thud(power = 1) {                     // 踹到肉的闷响
+    if (!this.ctx || !this.on) return;
+    this.tone(rand(70, 95), 0.22, 0.45 * power, 'sine', -50);
+    const n = this.noise(0.16); const f = this.ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 900;
+    n.connect(f); this.env(f, 0.3 * power, 0.16); n.start();
+  },
+  whoosh() {
+    if (!this.ctx || !this.on) return;
+    const n = this.noise(0.28); const f = this.ctx.createBiquadFilter(); f.type = 'bandpass';
+    f.frequency.setValueAtTime(500, this.ctx.currentTime);
+    f.frequency.exponentialRampToValueAtTime(2600, this.ctx.currentTime + 0.22); f.Q.value = 1.2;
+    n.connect(f); this.env(f, 0.16, 0.26); n.start();
+  },
+  cash() {                              // 收银台 / 点钞
+    if (!this.ctx || !this.on) return;
+    [1320, 1760, 2200].forEach((h, i) => setTimeout(() => this.tone(h, 0.16, 0.12, 'triangle'), i * 55));
+    this.tone(880, 0.5, 0.1, 'triangle', 240);
+  },
+  groan(pitch = 1) {                    // 坏人惨叫
+    if (!this.ctx || !this.on) return;
+    const o = this.ctx.createOscillator(); o.type = 'sawtooth';
+    const t = this.ctx.currentTime;
+    o.frequency.setValueAtTime(180 * pitch, t);
+    o.frequency.exponentialRampToValueAtTime(90 * pitch, t + 0.4);
+    const f = this.ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1200;
+    o.connect(f); this.env(f, 0.14, 0.45); o.start(); o.stop(t + 0.5);
+  },
+  step() { this.tone(rand(140, 190), 0.07, 0.07, 'square', -60); }
+};
+
+// ---------------------------------------------------------------- 4. 程序化贴图
+function cv(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return [c, c.getContext('2d')]; }
+function tex(canvas, repeat = [1, 1]) {
+  const t = new THREE.CanvasTexture(canvas);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(repeat[0], repeat[1]);
+  t.anisotropy = 4;
+  return t;
+}
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath(); ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+
+// 木地板：错缝长条 + 每块板色差 + 顺着板长的木纹
+function woodTex() {
+  const [c, g] = cv(512, 512);
+  g.fillStyle = '#5e4029'; g.fillRect(0, 0, 512, 512);
+  const rows = 8, ph = 512 / rows, pw = 170;
+  for (let r = 0; r < rows; r++) {
+    for (let x = -pw; x < 512; x += pw) {
+      const px = x + (r % 2 ? pw / 2 : 0), v = rand(-16, 16);
+      g.fillStyle = `rgb(${110 + v | 0},${76 + v * .8 | 0},${47 + v * .6 | 0})`;
+      g.fillRect(px + 1, r * ph + 1, pw - 2, ph - 2);
+      g.strokeStyle = 'rgba(48,30,16,.30)'; g.lineWidth = 1;
+      for (let i = 0; i < 4; i++) {
+        const yy = r * ph + rand(3, ph - 3);
+        g.beginPath(); g.moveTo(px + 3, yy);
+        g.bezierCurveTo(px + pw * .35, yy + rand(-2, 2), px + pw * .7, yy + rand(-2, 2), px + pw - 3, yy);
+        g.stroke();
+      }
+    }
+  }
+  return tex(c, [5, 5]);
+}
+// 墙纸：底色 + 竖条纹 + 细噪点
+function wallTex() {
+  const [c, g] = cv(256, 256);
+  g.fillStyle = '#7d6f74'; g.fillRect(0, 0, 256, 256);
+  for (let x = 0; x < 256; x += 26) {
+    g.fillStyle = 'rgba(255,255,255,.05)'; g.fillRect(x, 0, 12, 256);
+    g.fillStyle = 'rgba(0,0,0,.05)'; g.fillRect(x + 12, 0, 2, 256);
+  }
+  for (let i = 0; i < 7000; i++) { g.fillStyle = `rgba(0,0,0,${Math.random() * .05})`; g.fillRect(Math.random() * 256, Math.random() * 256, 2, 2); }
+  return tex(c, [4, 1.2]);
+}
+// 地毯：暗红底 + 米色回字纹
+function rugTex() {
+  const [c, g] = cv(256, 256);
+  g.fillStyle = '#7a2f3a'; g.fillRect(0, 0, 256, 256);
+  g.strokeStyle = 'rgba(226,198,150,.55)'; g.lineWidth = 7; g.strokeRect(12, 12, 232, 232);
+  g.strokeStyle = 'rgba(226,198,150,.30)'; g.lineWidth = 3; g.strokeRect(28, 28, 200, 200);
+  for (let i = 0; i < 6; i++) for (let j = 0; j < 6; j++) {
+    const x = 46 + i * 28, y = 46 + j * 28;
+    g.strokeStyle = 'rgba(226,198,150,.22)'; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(x, y - 8); g.lineTo(x + 8, y); g.lineTo(x, y + 8); g.lineTo(x - 8, y); g.closePath(); g.stroke();
+  }
+  for (let i = 0; i < 9000; i++) { g.fillStyle = `rgba(255,255,255,${Math.random() * .05})`; g.fillRect(Math.random() * 256, Math.random() * 256, 2, 2); }
+  return tex(c, [1, 1]);
+}
+// 窗外夜景：渐变夜空 + 月亮 + 远处亮着灯的楼
+function cityViewTex() {
+  const [c, g] = cv(256, 176);
+  const gr = g.createLinearGradient(0, 0, 0, 176);
+  gr.addColorStop(0, '#081027'); gr.addColorStop(.55, '#1a2547'); gr.addColorStop(1, '#3c3a58');
+  g.fillStyle = gr; g.fillRect(0, 0, 256, 176);
+  for (let i = 0; i < 46; i++) { g.fillStyle = `rgba(255,255,255,${Math.random() * .7})`; g.fillRect(Math.random() * 256, Math.random() * 66, 1.5, 1.5); }
+  g.fillStyle = 'rgba(238,238,214,.92)'; g.beginPath(); g.arc(212, 30, 12, 0, 7); g.fill();
+  g.fillStyle = 'rgba(26,37,71,.55)'; g.beginPath(); g.arc(206, 26, 11, 0, 7); g.fill();
+  for (let i = 0; i < 9; i++) {
+    const w = rand(20, 44), h = rand(38, 104), x = rand(-8, 248), y = 176 - h;
+    g.fillStyle = `rgb(${14 + rand(0, 12) | 0},${18 + rand(0, 12) | 0},${32 + rand(0, 16) | 0})`;
+    g.fillRect(x, y, w, h);
+    for (let yy = y + 6; yy < 170; yy += 11) for (let xx = x + 4; xx < x + w - 5; xx += 9) {
+      if (Math.random() < .34) { g.fillStyle = `rgba(255,${200 - rand(0, 70) | 0},${130 - rand(0, 50) | 0},.9)`; g.fillRect(xx, yy, 4, 5); }
+    }
+  }
+  return tex(c, [1, 1]);
+}
+// 钞票
+function billTex() {
+  const [c, g] = cv(256, 128);
+  const gr = g.createLinearGradient(0, 0, 256, 128);
+  gr.addColorStop(0, '#8ab974'); gr.addColorStop(.45, '#a9d68e'); gr.addColorStop(1, '#75a763');
+  g.fillStyle = gr; g.fillRect(0, 0, 256, 128);
+  // 雕版底纹：细密斜线 + 一圈圈同心圆。钞票的"贵气"其实就是这种重复细线，
+  // 少了它，缩到屏幕上一小块就只是张绿色贴纸。
+  g.save(); g.globalAlpha = .09; g.strokeStyle = '#1f4a1a'; g.lineWidth = 1;
+  for (let x = -140; x < 256; x += 6) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x + 70, 128); g.stroke(); }
+  g.restore();
+  g.save(); g.globalAlpha = .14; g.strokeStyle = '#2e5c26'; g.lineWidth = .9;
+  for (let r = 9; r < 44; r += 3.2) { g.beginPath(); g.arc(128, 64, r, 0, 7); g.stroke(); }
+  g.restore();
+  g.strokeStyle = 'rgba(255,255,255,.8)'; g.lineWidth = 4; g.strokeRect(9, 9, 238, 110);
+  g.strokeStyle = 'rgba(28,58,24,.55)'; g.lineWidth = 1.5; g.strokeRect(18, 18, 220, 92);
+  g.fillStyle = 'rgba(255,255,255,.62)'; g.beginPath(); g.ellipse(128, 64, 34, 40, 0, 0, 7); g.fill();
+  g.strokeStyle = 'rgba(38,74,32,.5)'; g.lineWidth = 2; g.beginPath(); g.ellipse(128, 64, 34, 40, 0, 0, 7); g.stroke();
+  g.fillStyle = '#254d1e'; g.font = 'bold 40px serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText('¥', 128, 66);
+  g.font = 'bold 21px serif'; g.fillText('100', 46, 38); g.fillText('100', 210, 92);
+  g.font = 'bold 11px ui-monospace,Menlo,monospace';
+  g.fillStyle = 'rgba(35,70,30,.75)';
+  g.textAlign = 'left'; g.fillText('QD·88888888', 26, 106);
+  g.textAlign = 'right'; g.fillText('100', 232, 26);
+  for (let i = 0; i < 500; i++) { g.fillStyle = `rgba(20,50,15,${Math.random() * .13})`; g.fillRect(Math.random() * 256, Math.random() * 128, 2, 2); }
+  return tex(c);
+}
+const BILL_TEX = billTex();
+
+// 系统自带的"坏人脸"（没上传照片时用）
+function sketchyFace(seed = Math.random() * 1000, angry = true, skinHex = 0xc79a76) {
+  const [c, g] = cv(512, 512);
+  const R = n => { const x = Math.sin(seed + n * 12.9898) * 43758.5453; return x - Math.floor(x); };
+  g.clearRect(0, 0, 512, 512);
+  // 脸（椭圆）
+  // 底色直接取角色自己的皮肤色：以前贴图里另配一套 hsl 肤色，
+  // 贴到 3D 头上就是"脸上糊了张颜色不对的面具"。
+  const skin = '#' + ('000000' + (skinHex >>> 0).toString(16)).slice(-6);
+  const gr = g.createRadialGradient(220, 190, 40, 256, 280, 260);
+  // 明暗渐变压到 .18/.14：之前 .35/.25 太狠，贴到 3D 头上以后贴片自带一套光、
+  // 脑袋本身另一套光，交界处就出现一圈"面具边"。留一点体积感就够。
+  gr.addColorStop(0, 'rgba(255,255,255,.18)'); gr.addColorStop(1, 'rgba(0,0,0,.14)');
+  // 底色铺满整张画布，不再只画一个椭圆脸：贴片是贴在颅骨外面的一层弧面，
+  // 椭圆以外是透明的，会露出下面受光完全不同的颅骨，脸周围就显出一圈边界。
+  g.fillStyle = skin; g.fillRect(0, 0, 512, 512);
+  g.fillStyle = gr; g.fillRect(0, 0, 512, 512);
+  // 发际线不再画在贴图里：3D 发帽的下沿就是发际线。
+  // 以前两条都有，额头上会同时出现"帽檐 + 一道黑杠 + 眉毛"三层，像戴假发。
+  if (angry && R(7) > .45) {   // 胡子：颜色原来蹭的是发际线那行 fillStyle，删掉发际线后必须自己声明
+    g.fillStyle = `hsl(${20 + R(4) * 20},${20 + R(5) * 20}%,${14 + R(6) * 14}%)`;
+    g.beginPath(); g.ellipse(256, 352, 120, 34, 0, 0, 7); g.fill();
+  }
+  // 眉毛：坏人倒八字，正派平眉
+  g.strokeStyle = '#241a12'; g.lineWidth = 26; g.lineCap = 'round';
+  if (angry) {
+    g.beginPath(); g.moveTo(118, 196); g.lineTo(228, 232); g.stroke();
+    g.beginPath(); g.moveTo(394, 196); g.lineTo(284, 232); g.stroke();
+  } else {
+    g.beginPath(); g.moveTo(126, 214); g.lineTo(232, 210); g.stroke();
+    g.beginPath(); g.moveTo(386, 214); g.lineTo(280, 210); g.stroke();
+  }
+  // 眼睛
+  for (const ex of [178, 334]) {
+    g.fillStyle = '#fff'; g.beginPath(); g.ellipse(ex, 262, 40, 26, 0, 0, 7); g.fill();
+    g.fillStyle = '#1a1a1a'; g.beginPath(); g.arc(ex + (R(8) - .5) * 14, 266, 15, 0, 7); g.fill();
+    g.fillStyle = '#fff'; g.beginPath(); g.arc(ex + 6, 260, 4.5, 0, 7); g.fill();
+  }
+  // 蒜头鼻
+  g.fillStyle = 'rgba(150,90,70,.55)'; g.beginPath(); g.ellipse(256, 330, 34, 26, 0, 0, 7); g.fill();
+  // 嘴：坏笑 / 平静
+  g.strokeStyle = angry ? '#5c2b2b' : '#7a4a44'; g.lineWidth = 14; g.beginPath();
+  if (angry) g.moveTo(176, 392), g.quadraticCurveTo(256, 440, 344, 386);
+  else g.moveTo(196, 400), g.quadraticCurveTo(256, 418, 316, 400);
+  g.stroke();
+  if (angry) { g.fillStyle = '#fff'; g.fillRect(214, 396, 22, 16); g.fillRect(276, 396, 22, 16); }
+  // 腮红/油光
+  g.fillStyle = 'rgba(255,180,120,.22)'; g.beginPath(); g.ellipse(140, 330, 46, 30, 0, 0, 7); g.fill();
+  g.beginPath(); g.ellipse(372, 330, 46, 30, 0, 0, 7); g.fill();
+  return c;
+}
+
+// 对话气泡贴图
+function bubbleTex(text, color = '#111') {
+  const [c, g] = cv(512, 160);
+  g.font = 'bold 46px "PingFang SC","Microsoft YaHei",sans-serif';
+  const w = Math.min(500, g.measureText(text).width + 46);
+  g.fillStyle = 'rgba(255,255,255,.96)';
+  roundRect(g, 256 - w / 2, 20, w, 88, 24); g.fill();
+  g.beginPath(); g.moveTo(236, 104); g.lineTo(256, 140); g.lineTo(276, 104); g.closePath(); g.fill();
+  g.fillStyle = color; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(text, 256, 64);
+  return c;
+}
+// 头顶名牌：512x128 的圆角胶囊，字太长就自动缩字号，保证不出画布
+function nameTagTex(text, accent) {
+  const [c, g] = cv(512, 128);
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  let fs = 50;
+  g.font = `bold ${fs}px "PingFang SC","Microsoft YaHei",sans-serif`;
+  const tw = g.measureText(text).width;
+  if (tw > 420) {
+    fs = Math.max(24, Math.floor(fs * 420 / tw));
+    g.font = `bold ${fs}px "PingFang SC","Microsoft YaHei",sans-serif`;
+  }
+  const w = Math.min(480, g.measureText(text).width + 52);
+  // 名牌是 Sprite，没有几何深度，靠"先画一层右下偏移的黑胶囊"才从背景里浮出来
+  g.fillStyle = 'rgba(0,0,0,.40)'; roundRect(g, 256 - w / 2 + 6, 36, w, 68, 34); g.fill();
+  g.fillStyle = 'rgba(9,12,17,.80)'; roundRect(g, 256 - w / 2, 30, w, 68, 34); g.fill();
+  g.fillStyle = 'rgba(255,255,255,.10)'; roundRect(g, 256 - w / 2 + 6, 35, w - 12, 26, 20); g.fill();
+  g.strokeStyle = accent; g.lineWidth = 4; roundRect(g, 256 - w / 2, 30, w, 68, 34); g.stroke();
+  g.lineJoin = 'round'; g.lineWidth = 7; g.strokeStyle = 'rgba(0,0,0,.55)'; g.strokeText(text, 256, 65);
+  g.fillStyle = '#fff'; g.fillText(text, 256, 65);
+  return c;
+}
+// 飘字（伤害/金额）
+function popTex(text, color = '#ffd166', size = 74) {
+  const [c, g] = cv(512, 192);
+  g.font = `900 ${size}px "PingFang SC",Impact,sans-serif`;
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  // 四层：偏移投影 → 粗描边 → 本色填充 → source-atop 上亮下暗。
+  // source-atop 只给已经画上色的像素叠色，所以字有厚度又不会糊成一团。
+  g.fillStyle = 'rgba(0,0,0,.32)'; g.fillText(text, 258, 101);
+  g.lineJoin = 'round'; g.lineWidth = 14; g.strokeStyle = 'rgba(0,0,0,.72)';
+  g.strokeText(text, 256, 96);
+  g.fillStyle = color; g.fillText(text, 256, 96);
+  g.globalCompositeOperation = 'source-atop';
+  const gr = g.createLinearGradient(0, 38, 0, 154);
+  gr.addColorStop(0, 'rgba(255,255,255,.62)'); gr.addColorStop(.42, 'rgba(255,255,255,0)');
+  gr.addColorStop(1, 'rgba(0,0,0,.40)');
+  g.fillStyle = gr; g.fillRect(0, 0, 512, 192);
+  g.globalCompositeOperation = 'source-over';
+  return c;
+}
+// 简易"找脸"：缩到 64x64，按 YCbCr 肤色范围标出肤色像素，再用均值漂移收缩出
+// 最大的那块肤色（=脸）。找不到（风景照/纯背景）就返回 null，退回原来的居中裁切。
+function findFaceRect(img) {
+  if (img.__fr !== undefined) return img.__fr;   // 每张图只找一次，拖滑块时不用重算
+  img.__fr = null;
+  const N = 64, [c, g] = cv(N, N);
+  g.drawImage(img, 0, 0, N, N);
+  let d;
+  try { d = g.getImageData(0, 0, N, N).data; } catch (e) { return null; }
+  const mask = new Uint8Array(N * N);
+  let total = 0;
+  for (let i = 0; i < N * N; i++) {
+    const r = d[i * 4], y = d[i * 4 + 1], b = d[i * 4 + 2];
+    const cb = 128 - .168737 * r - .331264 * y + .5 * b;
+    const cr = 128 + .5 * r - .418688 * y - .081312 * b;
+    const skin = cr >= 133 && cr <= 178 && cb >= 78 && cb <= 132 && r > 60 && y > 32 && b > 15 && r > b;
+    mask[i] = skin ? 1 : 0; total += skin ? 1 : 0;
+  }
+  if (total < N * N * .004) return null;
+  // 均值漂移：从"所有肤色像素的重心"出发，反复把窗口收缩到最大的那块肤色上。
+  // 不依赖固定窗口大小，所以自拍、半身照、合影里的小脸都能抓住。
+  let cx = 0, cy = 0;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (mask[y * N + x]) { cx += x; cy += y; }
+  cx /= total; cy /= total;
+  let R = N / 3, kept = 0, sdx = 0, sdy = 0;
+  for (let it = 0; it < 7; it++) {
+    let s = 0, ax = 0, ay = 0;
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const dx = x - cx, dy = y - cy;
+      if (!mask[y * N + x] || dx * dx + dy * dy > R * R) continue;
+      s++; ax += x; ay += y;
+    }
+    if (s < 4) break;
+    cx = ax / s; cy = ay / s; kept = s;
+    let vx = 0, vy = 0;
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const dx = x - cx, dy = y - cy;
+      if (!mask[y * N + x] || dx * dx + dy * dy > R * R) continue;
+      vx += dx * dx; vy += dy * dy;
+    }
+    sdx = Math.sqrt(vx / s); sdy = Math.sqrt(vy / s);
+    R = clamp(Math.max(sdx, sdy) * 4.4, 4, N / 2);   // 椭圆半轴约等于 2 倍标准差，窗口取 2.2 倍半轴
+  }
+  if (kept < 6 || kept / total < .2) return null;     // 肤色太散（风景照/几只小手）就不猜了
+  const iw = img.width || img.naturalWidth, ih = img.height || img.naturalHeight;
+  // 返回"脸中心 + 取景边长"，由 fitFaceImage 把脸中心对到画布中心，
+  // 这样脸贴在照片边上时也不会被裁歪。
+  const side = clamp(sdy * 4 / N * ih * 1.35, Math.min(iw, ih) * .1, Math.min(iw, ih) * 1.6);
+  return img.__fr = { fx: cx / N * iw, fy: cy / N * ih, side };
+}
+// 抠图：上传照片自动做"正脸裁切 + 椭圆遮罩"。
+// crop 是给固定演员用的：{ fx, fy, side }，全部用比例表示（fx 占宽、fy 占高、side 占短边），
+// 这样照片以后再压一遍分辨率也不用改数。给了 crop 就完全跳过自动找脸，
+// 因为自动那套是按"肤色块"取景的，半身照会把胸口一起框进来，脸就只剩一小块。
+// crop 传 false 则走另一条路：整张照片原样塞进画布，一点不裁（坏人B那张要求保留全图）。
+function fitFaceImage(img, round = 0.3, auto = true, crop = null) {
+  const S = 512, [c, g] = cv(S, S);
+  const iw = img.width || img.naturalWidth, ih = img.height || img.naturalHeight;
+  if (crop === false) {
+    // contain：等比缩放到刚好装下整张图，宁可左右留白也不切掉画面里的任何东西
+    const k = Math.min(S / iw, S / ih);
+    g.drawImage(img, (S - iw * k) / 2, (S - ih * k) / 2, iw * k, ih * k);
+    return c;
+  }
+  const r = crop ? null : (auto ? findFaceRect(img) : null);
+  const fx = crop ? crop.fx * iw : (r ? r.fx : iw / 2);
+  const fy = crop ? crop.fy * ih : (r ? r.fy : ih * .42);
+  const side = crop ? crop.side * Math.min(iw, ih) : (r ? r.side : Math.min(iw, ih));
+  const k = S / side;                                 // 取景边长 → 画布边长的缩放
+  g.save();
+  if (round < 0.9) {
+    // ry 给到 0.62 而不是 0.56：下巴正好落在画布下沿附近，椭圆收得太圆会把下巴两侧切掉，
+    // 露出底下程序脸的下巴，接缝处就成了一片"扇贝边"。
+    g.beginPath(); g.ellipse(S / 2, S / 2, S * 0.5, S * 0.62, 0, 0, 7); g.clip();
+  } else { g.beginPath(); g.arc(S / 2, S / 2, S / 2, 0, 7); g.clip(); }
+  // 整张图按比例放大，把脸中心落到画布中心（略偏上，给额头留位置）；
+  // 照片边缘不够就留透明，贴到头上会透出底下的皮肤色，比把脸裁歪好。
+  g.drawImage(img, S / 2 - fx * k, S * .53 - fy * k, iw * k, ih * k);
+  g.restore();
+  // 边缘羽化：硬切的椭圆在头上就是一张"证件照贴片"，四角还留着背景。
+  // 用 destination-in 叠一圈径向渐变，最外 4% 淡出，接缝交给底下的程序脸去补。
+  // 淡出带不能太宽：照片下沿是衣领，底下又是程序脸的下巴，过渡拖到 25px
+  // 两层内容会糊成一片"撕纸边"，反而比硬边更难看。
+  g.save();
+  g.globalCompositeOperation = 'destination-in';
+  g.translate(S / 2, S / 2); g.scale(1, 1.24);          // 和上面那个椭圆遮罩同比例（0.5 : 0.62）
+  const feather = g.createRadialGradient(0, 0, S * .5 * .96, 0, 0, S * .5);
+  feather.addColorStop(0, 'rgba(0,0,0,1)'); feather.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = feather; g.fillRect(-S, -S, S * 2, S * 2);
+  g.restore();
+  // 亮度不做进贴图（由 faceMat.color 承担），否则 1.8 亮度会被平方
+  return c;
+}
+
+// ---------------------------------------------------------------- 5. 人偶骨架
+// 关节命名：hips 骨盆 / spine 上身 / neck 脖子 / head 头
+//           shL shR 肩 / elL elR 肘 / haL haR 手
+//           hiL hiR 髋 / knL knR 膝 / anL anR 踝
+function makeHumanoid(opt = {}) {
+  const o = Object.assign({
+    height: 1.78, skin: 0xc79a76, shirt: 0x2f3a55, pants: 0x272c38, shoe: 0x15181f,
+    hair: 0x1b1712, faceCanvas: null, jacket: false, belly: 0, mass: 1, name: '', faceAngry: true
+  }, opt);
+  const s = o.height / 1.78;
+  const root = new THREE.Group();
+  const hips = new THREE.Group(); hips.position.y = 0.95 * s; root.add(hips);
+
+  const M = (color, rough = .85, metal = 0) => new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal });
+  // skinM 皮肤 / shirtM 上衣 / pantsM 裤子 / shoeM 鞋面 / soleM 白鞋底（两只脚共用一份材质）
+  const skinM = M(o.skin, .78), shirtM = M(o.shirt, .82), pantsM = M(o.pants, .88), shoeM = M(o.shoe, .6);
+  const soleM = M(0xe8eaf0, .62);
+
+  const cast = m => { m.castShadow = true; m.receiveShadow = false; return m; };
+
+  // 骨盆：从方块改成压扁的球。胯部是剪影里最容易看出"这是个纸箱"的地方，
+  // 半径 .115 配 scale(1.32,.88,.88)，外接盒和原来的方块几乎一样大，只是圆了。
+  const pelvis = cast(new THREE.Mesh(new THREE.SphereGeometry(.115 * s, 20, 16), o.jacket ? shirtM : pantsM));
+  pelvis.scale.set(1.32, .88, .88); pelvis.position.y = .02 * s; hips.add(pelvis);
+  // 腰带 + 金属扣：环境贴图进来之后，这一小块高金属件会自己映出灯的光斑，很划算。
+  // 不能用方块：骨盆是椭球，方皮带的四个角会比身体凸出 4cm 多，正面看像胯上横了块跳板。
+  // 改成圆柱再按同一个比例压扁（1.32 / .88），就和胯的表面完全贴合，只露出 3mm 边。
+  const belt = cast(new THREE.Mesh(new THREE.CylinderGeometry(.118 * s, .118 * s, .05 * s, 22), M(0x241d16, .55)));
+  belt.scale.set(1.32, 1, .88); belt.position.y = .02 * s; hips.add(belt);
+  const buckle = new THREE.Mesh(new THREE.BoxGeometry(.055 * s, .04 * s, .014 * s), M(0xc9a24a, .26, .92));
+  buckle.position.set(0, .02 * s, .112 * s); hips.add(buckle);
+
+  // 上身
+  const spine = new THREE.Group(); spine.position.y = .10 * s; hips.add(spine);
+  const chest = cast(new THREE.Mesh(new THREE.CapsuleGeometry(.155 * s, .26 * s, 6, 14), shirtM));
+  chest.scale.set(1.10, 1, .78 + o.belly * .2); chest.position.y = .26 * s; spine.add(chest);
+  // 斜方肌：脖子根到肩顶的两条斜肉。没有它的时候，胸腔是一根竖直胶囊、
+  // 肩膀是两颗孤零零的球，正面上看就是"箱子上摞俩球"。
+  // 胶囊本地 +Y 轴经 rotation.z=θ 变成 (-sinθ, cosθ)，要让它指向 (0.936,-0.347)，
+  // 解出 θ≈-1.933，右侧取负、左侧镜像。
+  for (const side of [-1, 1]) {
+    const trap = cast(new THREE.Mesh(new THREE.CapsuleGeometry(.048 * s, .05 * s, 4, 10), shirtM));
+    trap.scale.set(1, 1, .82);
+    trap.position.set(side * .1225 * s, .445 * s, 0);
+    trap.rotation.z = -side * 1.933; spine.add(trap);
+  }
+  if (o.jacket && o.belly < .5) {  // 外套门襟：瘦体型才加，胖体型的肚子会把它埋掉
+    // 压暗要用 multiplyScalar：r152 之后 offsetHSL 在线性空间里加减，
+    // 深色衣服本来亮度就只剩 0.05 左右，再 -0.07 直接归零变成纯黑方块。
+    const lapM = M(o.shirt, .7); lapM.color.multiplyScalar(.85);
+    const lap = cast(new THREE.Mesh(new THREE.BoxGeometry(.07 * s, .30 * s, .03 * s), lapM));
+    lap.position.set(0, .27 * s, .155 * s * (.78 + o.belly * .2) + .004 * s); spine.add(lap);
+    // 翻领：门襟顶端向两侧岔开成一个 V，外套才有"领子"而不是"一条缝"。
+    // 胸腔截面是椭圆（x 半径 .1705、z 半径 .155*(.78+belly*.2)），
+    // 所以 x=.082 处的表面 z 要按椭圆方程算，直接给个定值会让领子悬空或陷进胸口；
+    // rotation.y 取该点的法线倾角，领片就"趴"在胸上，rotation.z=side*.22 让上端朝中线倒成 V。
+    const lz = .1385 * (.78 + o.belly * .2);
+    for (const side of [-1, 1]) {
+      const lp = cast(new THREE.Mesh(new THREE.BoxGeometry(.085 * s, .115 * s, .022 * s), lapM));
+      lp.position.set(side * .082 * s, .40 * s, lz * s);
+      lp.rotation.set(-.14, side * .38, side * .22); spine.add(lp);
+    }
+  }
+  if (o.belly > 0) {
+    // 肚子：原来是个 .17 的球直接糊在胸口前面，正面看像衬衫上别了颗球。
+    // 把横向半径拉到比胸还宽（.17*1.16=.197 > 胸的 .1705），轮廓就从肚子顺出去，
+    // 交界处缩进胸腔里，只留"腰腹一圈鼓出来"这一个信息。
+    const bel = cast(new THREE.Mesh(new THREE.SphereGeometry(.17 * s, 18, 14), shirtM));
+    bel.scale.set(1.16, .92, .82 + o.belly * .34); bel.position.set(0, .07 * s, .045 * s); spine.add(bel);
+  }
+  // 脖子 + 头：脖子抬高 2.5cm，之前下巴直接埋进胸口，看着像没有脖子。
+  const neck = new THREE.Group(); neck.position.y = .505 * s; spine.add(neck);
+  const nk = cast(new THREE.Mesh(new THREE.CylinderGeometry(.052 * s, .06 * s, .09 * s, 10), skinM));
+  nk.position.y = .02 * s; neck.add(nk);
+  // 领口：一圈环面套在脖子根，挂在 spine 上（不跟头转），
+  // 有了它才不会是"一个脑袋直接插在箱子上"。
+  // 高度要卡在胸腔收口的地方：胸口截面在 y=.50 处只剩 .109×.085，
+  // 半径 .087 的领圈才刚刚探出来；再低就被胸腔整个吞掉，等于白画。
+  const collarM = M(o.shirt, .76); collarM.color.multiplyScalar(1.22);
+  const collar = cast(new THREE.Mesh(new THREE.TorusGeometry(.070 * s, .017 * s, 8, 20), collarM));
+  collar.rotation.x = Math.PI / 2; collar.position.y = .50 * s; spine.add(collar);
+  const head = new THREE.Group(); head.position.y = .13 * s; neck.add(head);
+  const skull = cast(new THREE.Mesh(new THREE.SphereGeometry(.115 * s, 22, 18), skinM));
+  skull.scale.set(1, 1.22, 1.06); skull.position.y = .02 * s; head.add(skull);
+  const jaw = cast(new THREE.Mesh(new THREE.SphereGeometry(.085 * s, 16, 12), skinM));
+  jaw.scale.set(1, .82, 1); jaw.position.set(0, -.055 * s, .018 * s); head.add(jaw);
+  const nose = cast(new THREE.Mesh(new THREE.ConeGeometry(.026 * s, .05 * s, 10), skinM));
+  nose.rotation.x = Math.PI / 2; nose.position.set(0, .005 * s, .118 * s); head.add(nose);
+  for (const sx of [-1, 1]) {
+    // 耳朵得探出头壳：两侧头发半径 .127，耳朵原来放 .112，外沿只到 .129，
+    // 侧面看就是黑头发上顶了个小包。挪到 .1215，耳廓有 1cm 露在头发外面。
+    const ear = cast(new THREE.Mesh(new THREE.SphereGeometry(.028 * s, 10, 8), skinM));
+    ear.scale.set(.6, 1, .8); ear.position.set(sx * .1215 * s, .01 * s, 0); head.add(ear);
+  }
+  // 发帽：下沿 theta=1.05，压进放大后的面部贴片（起始 .88）上沿约 .17 rad，
+  // 这条边就是唯一的发际线（贴图里原来还画了一条，两条叠着像假发，已删）。
+  // 三片头发的半径必须一层比一层大（颅骨 .115 < 贴片 .119 < 发帽 .124 < 两侧 .127 < 后脑 .130），
+  // 谁在外面谁盖住接缝，否则壳面重合处会闪面。
+  // 头发改用 Lambert（完全没有高光项）：吊灯离头顶只有 0.6m，Standard 材质那 4% 的
+  // 介质高光在 roughness≈1 下会摊成一大片暖黄，近黑的头发被洗成"光头色"。
+  const hairM = new THREE.MeshLambertMaterial({ color: o.hair });
+  const hair = cast(new THREE.Mesh(new THREE.SphereGeometry(.124 * s, 28, 20, 0, Math.PI * 2, 0, 1.05), hairM));
+  hair.scale.set(1.02, 1.20, 1.06); hair.position.y = .034 * s; head.add(hair);
+  // 两侧和后脑的头发。phi 扇区原本是面部贴片（0.596~2.541）的补集，一寸不多一寸不少。
+  // 现在两侧往前多吃 0.125 rad 压住贴片的边缘：贴片和头发半径差只有 5mm，
+  // 边对边地摆，侧面看就是一道断崖；让头发盖过去一点，接缝就藏在鬓角下面。
+  // 吃掉的这一条正好是照片最外圈的透明区，不会啃到人脸。
+  // 分段数从 22×16 提到 40×26：扇形壳的下沿是折线，段数太少时发际线呈锯齿状，
+  // 第三人称老看后脑勺，这个锯齿比脸部的任何细节都扎眼。theta 也往下多盖到 2.02，
+  // 不然耳后到腮这一段露着头皮，像刚剃过。
+  const hairBack = cast(new THREE.Mesh(new THREE.SphereGeometry(.127 * s, 40, 26, Math.PI / 2 + 0.85, Math.PI * 2 - 1.70, .5, 1.52), hair.material));
+  hairBack.scale.set(1.02, 1.20, 1.06); hairBack.position.y = .034 * s; head.add(hairBack);
+  // 后脑单独补一块：第三人称 90% 的时间都在看角色的后脑勺，
+  // 两侧只到耳下是对的，但正后方如果收在耳下，看起来就是"后脑勺剃了个光头"。
+  // theta 每多走 .1 rad 才往下挪 1.7cm，所以这里要给到 2.18（后颈发际线）才盖得住；
+  // phi 以 3π/2（正后）为中心开 1.9 rad：只开 1.4 的话，它和 hairBack 的收口交界处
+  // 会露出一块三角形头皮，从背后看像后脑勺缺了一角。
+  // 扇区落在 3.76~5.66，和面部贴片的 0.596~2.541 完全不搭界，不会吃进照片。
+  const hairNape = cast(new THREE.Mesh(new THREE.SphereGeometry(.130 * s, 30, 22, Math.PI * 1.5 - 0.95, 1.9, .5, 1.68), hair.material));
+  hairNape.scale.set(1.02, 1.20, 1.06); hairNape.position.y = .034 * s; head.add(hairNape);
+  // 面部贴图（一张略鼓的弧面，贴在 skull 正前方）
+  // 上一版只盖住眉心到下巴、两颊之间 1.5 rad，照片贴上去小小一块，整蛊效果全没。
+  // 现在扩到 theta .88~2.38（发际线以下到下巴根）、phi 1.95 rad（几乎从左耳到右耳）。
+  // 鼓出量倒是往下收了：原来 .126 比颅骨 .115 鼓 11mm，侧 45° 看过去边缘一道台阶，
+  // 像脸上扣了个盘子。.119 只鼓 4mm，贴纸感还在，但轮廓不再断。
+  const faceGeo = new THREE.SphereGeometry(.119 * s, 34, 26, Math.PI / 2 - 0.975, 1.95, .88, 1.50);
+  const faceMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .82, metalness: 0, transparent: true });
+  const face = new THREE.Mesh(faceGeo, faceMat);
+  face.scale.set(1, 1.22, 1.06); face.position.y = .022 * s; head.add(face);
+  setFaceTexture(face, o.faceCanvas || sketchyFace(Math.random() * 1000, o.faceAngry !== false, o.skin));
+
+  // 手臂
+  const arm = (side) => {
+    const sh = new THREE.Group(); sh.position.set(side * .195 * s, .40 * s, 0); spine.add(sh);
+    const cap = cast(new THREE.Mesh(new THREE.SphereGeometry(.068 * s, 12, 10), shirtM));
+    cap.position.y = -.02 * s; sh.add(cap);
+    const up = cast(new THREE.Mesh(new THREE.CapsuleGeometry(.055 * s, .20 * s, 5, 10), shirtM));
+    up.position.y = -.135 * s; sh.add(up);
+    const el = new THREE.Group(); el.position.y = -.27 * s; sh.add(el);
+    const elbow = cast(new THREE.Mesh(new THREE.SphereGeometry(.051 * s, 10, 8), shirtM));
+    elbow.position.y = -.008 * s; el.add(elbow);      // 同上，给肘关节一个圆过渡
+    const fo = cast(new THREE.Mesh(new THREE.CapsuleGeometry(.047 * s, .18 * s, 5, 10), shirtM));
+    fo.position.y = -.125 * s; el.add(fo);
+    const ha = new THREE.Group(); ha.position.y = -.26 * s; el.add(ha);
+    // 手：手掌用胶囊、拇指单独一根，比一块白方块"手套"像人得多
+    const palm = cast(new THREE.Mesh(new THREE.CapsuleGeometry(.034 * s, .05 * s, 4, 12), skinM));
+    palm.scale.set(1.12, 1, .72); palm.position.y = -.045 * s; ha.add(palm);
+    const thumb = cast(new THREE.Mesh(new THREE.CapsuleGeometry(.015 * s, .026 * s, 3, 8), skinM));
+    thumb.position.set(-side * .034 * s, -.038 * s, .012 * s);
+    thumb.rotation.z = side * .55; ha.add(thumb);      // 拇指一律朝身体内侧
+    // 手指合成一块"掌板"：贴脸特写里手不再是一只圆头手套，
+    // 压扁（z 方向 .62）后从正面看才有指节的厚度感，而不是两根香肠。
+    const fingers = cast(new THREE.Mesh(new THREE.CapsuleGeometry(.026 * s, .045 * s, 3, 10), skinM));
+    fingers.scale.set(1.25, 1, .62); fingers.position.set(0, -.078 * s, .006 * s); ha.add(fingers);
+    // 袖口：比衬衫略深的一圈，把"袖子"和"手"的分界交代清楚
+    const cuffM = M(o.shirt, .78); cuffM.color.multiplyScalar(.82);
+    const cuff = cast(new THREE.Mesh(new THREE.CylinderGeometry(.056 * s, .05 * s, .05 * s, 12), cuffM));
+    cuff.position.y = .006 * s; ha.add(cuff);
+    sh.rotation.z = side * .07; el.rotation.x = .18;
+    return { sh, el, ha };
+  };
+  const L = arm(-1), R = arm(1);
+
+  // 腿
+  const leg = (side) => {
+    const hi = new THREE.Group(); hi.position.set(side * .095 * s, -.06 * s, 0); hips.add(hi);
+    const th = cast(new THREE.Mesh(new THREE.CapsuleGeometry(.082 * s, .28 * s, 5, 12), pantsM));
+    th.position.y = -.19 * s; hi.add(th);
+    const kn = new THREE.Group(); kn.position.y = -.42 * s; hi.add(kn);
+    // 膝盖：大腿半径 .082 直接接小腿 .062 会有一道台阶，补一颗略大于小腿的球过渡。
+    const kneecap = cast(new THREE.Mesh(new THREE.SphereGeometry(.066 * s, 12, 10), pantsM));
+    kneecap.scale.set(1, 1, 1.18); kneecap.position.set(0, .005 * s, .014 * s); kn.add(kneecap);
+    const sh = cast(new THREE.Mesh(new THREE.CapsuleGeometry(.062 * s, .28 * s, 5, 12), pantsM));
+    sh.position.y = -.18 * s; kn.add(sh);
+    // 小腿肚：裤子在小腿后侧是一根直筒，补一颗向后凸的球，侧面剪影立刻有腿型。
+    const calf = cast(new THREE.Mesh(new THREE.SphereGeometry(.07 * s, 12, 10), pantsM));
+    calf.scale.set(.9, 1.15, 1); calf.position.set(0, -.07 * s, -.030 * s); kn.add(calf);
+    const an = new THREE.Group(); an.position.y = -.40 * s; kn.add(an);
+    const shoe = cast(new THREE.Mesh(new THREE.BoxGeometry(.105 * s, .065 * s, .24 * s), shoeM));
+    shoe.position.set(0, -.028 * s, .045 * s); an.add(shoe);
+    // 鞋头单独一颗压扁的球接在方头前面：鞋尖不再是硬直角，侧面剪影像双鞋而不是两块砖
+    const toe = cast(new THREE.Mesh(new THREE.SphereGeometry(.053 * s, 16, 12), shoeM));
+    toe.scale.set(1, .62, 1.25); toe.position.set(0, -.032 * s, .155 * s); an.add(toe);
+    const sole = cast(new THREE.Mesh(new THREE.BoxGeometry(.11 * s, .018 * s, .25 * s), soleM));
+    sole.position.set(0, -.058 * s, .045 * s); an.add(sole);
+    const toeSole = cast(new THREE.Mesh(new THREE.SphereGeometry(.055 * s, 14, 10), soleM));
+    toeSole.scale.set(1, .32, 1.2); toeSole.position.set(0, -.056 * s, .155 * s); an.add(toeSole);
+    // 鞋帮：比鞋面略亮一圈的薄圆柱，把"裤脚"和"鞋"之间补一个过渡
+    const ankleM = M(o.shoe, .5); ankleM.color.multiplyScalar(1.5);
+    const ankle = cast(new THREE.Mesh(new THREE.CylinderGeometry(.062 * s, .066 * s, .045 * s, 14), ankleM));
+    ankle.position.y = -.008 * s; an.add(ankle);
+    return { hi, kn, an };
+  };
+  const LL = leg(-1), RL = leg(1);
+
+  const j = { hips, spine, neck, head, shL: L.sh, elL: L.el, haL: L.ha, shR: R.sh, elR: R.el, haR: R.ha, hiL: LL.hi, knL: LL.kn, anL: LL.an, hiR: RL.hi, knR: RL.kn, anR: RL.an };
+  root.userData.rig = { root, j, s, face, faceMat, skull, nose, materials: { skinM, shirtM, pantsM }, opt: o };
+  return root.userData.rig;
+}
+
+function setFaceTexture(mesh, canvas) {
+  const t = new THREE.CanvasTexture(canvas);
+  t.colorSpace = THREE.SRGBColorSpace;
+  if (mesh.material.map) mesh.material.map.dispose();
+  mesh.material.map = t;
+  mesh.material.needsUpdate = true;
+  return t;
+}
+
+/* ---------------------------------------------------- 姿势数据
+   每个关节存 rx/ry/rz；hips 还带 py（上下）pz（前后）
+   约定：角色朝向 +Z。伸向 -Y 的肢体，rx 为负 = 往前抬；
+        伸向 +Y 的躯干，rx 为正 = 往前俯。                              */
+function basePose() {
+  const j = {};
+  for (const k of ['hips', 'spine', 'neck', 'head', 'shL', 'elL', 'haL', 'shR', 'elR', 'haR', 'hiL', 'knL', 'anL', 'hiR', 'knR', 'anR']) j[k] = { rx: 0, ry: 0, rz: 0 };
+  j.hips.py = 0; j.hips.pz = 0; j.hips.baseY = 0.95;
+  // 手肘的符号和膝盖是反的：骨头默认朝 -Y，rx 为负 = 往前/往上抡。
+  // 膝盖正值才是"小腿往后折"（解剖学正确），手肘必须用负值才不反关节。
+  // 之前 basePose 给的是 +.2，等于每个人默认把手肘往后顶，所有姿势都跟着翻车。
+  j.elL.rx = -.25; j.elR.rx = -.25; j.shL.rz = -.09; j.shR.rz = .09;
+  return j;
+}
+function P(src, over) {           // basePose + 覆盖
+  const p = basePose();
+  for (const k in over) Object.assign(p[k], over[k]);
+  return p;
+}
+function blendPose(a, b, t) {
+  for (const k in b) { const A = a[k], B = b[k]; for (const r in B) A[r] = lerp(A[r], B[r], t); }
+  return a;
+}
+function applyPose(rig, pose) {
+  const j = rig.j, s = rig.s;
+  for (const k in j) { const p = pose[k]; if (!p) continue; j[k].rotation.set((p.rx || 0) * 1, p.ry || 0, p.rz || 0); }
+  j.hips.position.y = (pose.hips.baseY + (pose.hips.py || 0)) * s;
+  j.hips.position.z = (pose.hips.pz || 0) * s;
+}
+
+// ---------------------------------------------------------------- 6. 场景
+// 手机 GPU 就那么大：DPR 2 + 2048 软阴影在 iPhone 上会直接掉到 20fps 以下。
+// 触屏把像素比上限压到 1.5、阴影贴图降到 1024；抗锯齿留着，画面糊了比锯齿更难看。
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, isTouch ? 1.5 : 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.42;   // 主光降到 32 后用曝光补中间调，高光仍走 ACES 软压
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+$('game').appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x14161c);   // 房间是封闭的，基本看不到底色
+
+// 程序化环境贴图：一张 2:1 的等距柱状渐变（天花板暖亮 / 墙面中性 / 地板吸光），
+// 再用 PMREMGenerator 预卷积成 roughness 可用的立方环境。
+// 有了它，门把手、易拉罐、电视屏这些高反射面才会映出柔和的环境光斑，
+// 材质的"贵气"主要靠这个，比再加几盏灯便宜得多。
+function envTex() {
+  const [c, g] = cv(256, 128);
+  const gr = g.createLinearGradient(0, 0, 0, 128);
+  gr.addColorStop(0, '#6d5f4c'); gr.addColorStop(.46, '#494650');
+  gr.addColorStop(.56, '#39352f'); gr.addColorStop(1, '#171512');
+  g.fillStyle = gr; g.fillRect(0, 0, 256, 128);
+  const hot = g.createRadialGradient(96, 20, 2, 96, 20, 40);      // 吊灯的高光反射
+  hot.addColorStop(0, 'rgba(255,226,178,1)'); hot.addColorStop(1, 'rgba(255,226,178,0)');
+  g.fillStyle = hot; g.fillRect(0, 0, 256, 128);
+  const cool = g.createRadialGradient(196, 62, 2, 196, 62, 52);   // 窗外的冷光反射
+  cool.addColorStop(0, 'rgba(126,158,214,.7)'); cool.addColorStop(1, 'rgba(126,158,214,0)');
+  g.fillStyle = cool; g.fillRect(0, 0, 256, 128);
+  return c;
+}
+{
+  const t = tex(envTex());
+  t.mapping = THREE.EquirectangularReflectionMapping;
+  const pm = new THREE.PMREMGenerator(renderer);
+  scene.environment = pm.fromEquirectangular(t).texture;
+  pm.dispose(); t.dispose();
+}
+
+const camera = new THREE.PerspectiveCamera(58, innerWidth / innerHeight, .05, 60);
+camera.position.set(0, 1.6, -3.2);
+
+// 房间：内部可用范围 x∈[x0, x0+W]、z∈[z0, z0+D]，人和坏人的边界、家具、出生点都从这里算
+const ROOM = { W: 10.4, D: 11.0, H: 2.86, x0: -5.2, z0: -6.4 };
+const RC = { x: ROOM.x0 + ROOM.W / 2, z: ROOM.z0 + ROOM.D / 2 };
+
+// 灯光：室内暖光。吊灯用聚光灯负责投影，落地灯和环境光只补亮度。
+// 精致感的关键是"敢留暗部"：以前半球光 .62 + 环境光 .3 平铺得太满，
+// 人和家具像蒙了层灰。现在把平光砍掉一大半，亮度靠主光、冷补光和环境贴图撑。
+{
+  // 主光强度：68 会把近黑的头发（反照率只有 .009）抬成黄褐色，看着像光头；
+  // 吊灯离头顶才 0.6m，这里降到 32，中间调交给曝光去补。
+  const lamp = new THREE.SpotLight(0xffd7a1, 32, 14, 1.24, .85, 1.5);
+  lamp.position.set(RC.x + .4, ROOM.H - .16, RC.z + 1.2);
+  lamp.target.position.set(RC.x + .4, 0, RC.z + 1.2);
+  lamp.castShadow = true;
+  lamp.shadow.mapSize.set(isTouch ? 1024 : 2048, isTouch ? 1024 : 2048);   // 阴影 pass 是整个场景再画一遍，手机上这里省一半最划算
+  lamp.shadow.camera.near = .4; lamp.shadow.camera.far = 14;
+  lamp.shadow.bias = -0.0012;
+  lamp.shadow.normalBias = .022;      // 沿法线方向抬一点采样点，专治细杆/手指上的条纹状漏光
+  scene.add(lamp, lamp.target);
+  const cordM = new THREE.MeshStandardMaterial({ color: 0x2b2b2b, roughness: .6 });
+  const cord = new THREE.Mesh(new THREE.CylinderGeometry(.012, .012, .4, 6), cordM);
+  cord.position.set(RC.x + .4, ROOM.H - .2, RC.z + 1.2); scene.add(cord);
+  const shade = new THREE.Mesh(new THREE.ConeGeometry(.3, .26, 22, 1, true),
+    new THREE.MeshStandardMaterial({ color: 0xf6e8cd, roughness: .5, side: THREE.DoubleSide, emissive: 0xffd7a1, emissiveIntensity: .45 }));
+  shade.position.set(RC.x + .4, ROOM.H - .5, RC.z + 1.2); scene.add(shade);
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(.07, 10, 8), new THREE.MeshBasicMaterial({ color: 0xfff2d4 }));
+  bulb.position.set(RC.x + .4, ROOM.H - .58, RC.z + 1.2); scene.add(bulb);
+  // 灯罩上沿总会往外漏一点光。不加这盏，画面上半截就是一片死黑的天花板；
+  // 加了就有一圈以灯泡为中心的暖渐变，天花板立刻"退"到背景里去。
+  const spill = new THREE.PointLight(0xffd7a1, 3.4, 4.6, 1.7);
+  spill.position.set(RC.x + .4, ROOM.H - .40, RC.z + 1.2); scene.add(spill);
+
+  const floorLampLight = new THREE.PointLight(0xffc98a, 13, 8, 2);
+  floorLampLight.position.set(-4.3, 1.5, 3.6); scene.add(floorLampLight);
+  // 窗外的冷蓝补光：不投影，只把暗部从"死黑"拉到"有颜色的暗"。
+  // 暖主光 + 冷补光一分层，立体感马上就出来了，这比整体调亮有效得多。
+  const moon = new THREE.DirectionalLight(0x9fc0ff, .55);
+  moon.position.set(-1.8, 2.1, ROOM.z0 + ROOM.D + 3);
+  moon.target.position.set(-1.0, .9, ROOM.z0 + ROOM.D - 2.2);
+  scene.add(moon, moon.target);
+  scene.add(new THREE.HemisphereLight(0xbfa586, 0x2a2018, .30));
+  scene.add(new THREE.AmbientLight(0xffffff, .10));
+}
+
+// 脚下的接触阴影。真实投影只有吊灯那一盏会打，人一走远影子就被拉得又长又淡，
+// 看起来像飘在地上。补一片跟着角色走的软黑圆片，是 3D 游戏里最便宜的"落地感"。
+function aoTex() {
+  const [c, g] = cv(128, 128);
+  const gr = g.createRadialGradient(64, 64, 3, 64, 64, 62);
+  gr.addColorStop(0, 'rgba(0,0,0,.50)'); gr.addColorStop(.5, 'rgba(0,0,0,.26)');
+  gr.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  return tex(c);
+}
+const AO_TEX = aoTex();
+function makeAO(s) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
+    new THREE.MeshBasicMaterial({ map: AO_TEX, transparent: true, depthWrite: false }));
+  m.rotation.x = -Math.PI / 2; m.scale.set(.8 * s, .64 * s, 1); m.position.y = .02;
+  scene.add(m); return m;
+}
+function moveAO(m, p) { if (m) m.position.set(p.x, .02, p.z); }
+
+// 吊灯下缓慢漂移的浮尘。空气"有厚度"是室内场景最容易被忽略的一层细节：
+// 用一组加法混合的 Points，颜色偏暖，只在灯锥附近的小盒子里循环。
+let motes = null;
+function buildMotes() {
+  const N = 110, arr = new Float32Array(N * 3), spd = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    arr[i * 3] = RC.x + .4 + rand(-1.7, 1.7);
+    arr[i * 3 + 1] = rand(.55, ROOM.H - .35);
+    arr[i * 3 + 2] = RC.z + 1.2 + rand(-1.7, 1.7);
+    spd[i] = rand(.02, .07);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+  const [c, g] = cv(64, 64);
+  const rg = g.createRadialGradient(32, 32, 0, 32, 32, 30);
+  rg.addColorStop(0, 'rgba(255,236,205,1)'); rg.addColorStop(.4, 'rgba(255,226,180,.5)');
+  rg.addColorStop(1, 'rgba(255,226,180,0)');
+  g.fillStyle = rg; g.fillRect(0, 0, 64, 64);
+  const pts = new THREE.Points(geo, new THREE.PointsMaterial({
+    size: .02, map: tex(c), color: 0xffe3b8, transparent: true,
+    depthWrite: false, blending: THREE.AdditiveBlending, opacity: .3
+  }));
+  scene.add(pts);
+  motes = { pts, arr, spd, n: N };
+}
+function driftMotes(dt) {
+  if (!motes) return;
+  const { arr, spd, n, pts } = motes;
+  for (let i = 0; i < n; i++) {
+    arr[i * 3] += Math.sin(perf * .5 + i) * .06 * dt;
+    arr[i * 3 + 1] -= spd[i] * dt;
+    arr[i * 3 + 2] += Math.cos(perf * .4 + i * 1.7) * .06 * dt;
+    if (arr[i * 3 + 1] < .5) arr[i * 3 + 1] = ROOM.H - .35;   // 落到底就回到顶上，循环
+  }
+  pts.geometry.attributes.position.needsUpdate = true;
+}
+let tvScreen = null;      // buildRoom 里赋值，用来做屏幕微闪
+
+// 地板 + 天花板
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM.W, ROOM.D), new THREE.MeshStandardMaterial({ map: woodTex(), roughness: .66 }));
+floor.rotation.x = -Math.PI / 2; floor.position.set(RC.x, 0, RC.z); floor.receiveShadow = true; scene.add(floor);
+const ceil = new THREE.Mesh(new THREE.PlaneGeometry(ROOM.W, ROOM.D), new THREE.MeshStandardMaterial({ color: 0xd2ccc3, roughness: .95 }));
+ceil.rotation.x = Math.PI / 2; ceil.position.set(RC.x, ROOM.H, RC.z); scene.add(ceil);
+
+// 四面墙 + 踢脚线
+const wallMat = new THREE.MeshStandardMaterial({ map: wallTex(), roughness: .93 });
+const T = .22;                                  // 墙厚
+for (const [w, d, x, z] of [
+  [ROOM.W + T * 2, T, RC.x, ROOM.z0 - T / 2],
+  [ROOM.W + T * 2, T, RC.x, ROOM.z0 + ROOM.D + T / 2],
+  [T, ROOM.D + T * 2, ROOM.x0 - T / 2, RC.z],
+  [T, ROOM.D + T * 2, ROOM.x0 + ROOM.W + T / 2, RC.z]]) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, ROOM.H, d), wallMat);
+  m.position.set(x, ROOM.H / 2, z); m.receiveShadow = true; scene.add(m);
+}
+{
+  const trimMat = new THREE.MeshStandardMaterial({ color: 0x3d332a, roughness: .7 });
+  for (const [w, d, x, z] of [
+    [ROOM.W, .05, RC.x, ROOM.z0 + .02], [ROOM.W, .05, RC.x, ROOM.z0 + ROOM.D - .02],
+    [.05, ROOM.D, ROOM.x0 + .02, RC.z], [.05, ROOM.D, ROOM.x0 + ROOM.W - .02, RC.z]]) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, .13, d), trimMat);
+    m.position.set(x, .065, z); scene.add(m);
+  }
+}
+
+// 家具的碰撞盒：不做真实物理，只把人和坏人从矩形里推出来
+const OBST = [];
+const block = (x0, x1, z0, z1) => OBST.push({ x0, x1, z0, z1 });
+function unblock(p, r) {
+  for (const b of OBST) {
+    const cx = clamp(p.x, b.x0, b.x1), cz = clamp(p.z, b.z0, b.z1);
+    const dx = p.x - cx, dz = p.z - cz, d = Math.hypot(dx, dz);
+    if (d > r) continue;
+    if (d > 1e-4) { const k = (r - d) / d; p.x += dx * k; p.z += dz * k; continue; }
+    // 人整个站进了家具里：沿最近的一条边推出去
+    const l = p.x - b.x0, rr = b.x1 - p.x, t = p.z - b.z0, bb = b.z1 - p.z, m = Math.min(l, rr, t, bb);
+    if (m === l) p.x = b.x0 - r; else if (m === rr) p.x = b.x1 + r;
+    else if (m === t) p.z = b.z0 - r; else p.z = b.z1 + r;
+  }
+}
+
+// 房间里的家具、窗、门
+const DOOR = { x: ROOM.x0 + .1, z: -1.4 };      // 坏人在这里滚出去
+function buildRoom() {
+  const M = (color, rough = .85, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: rough, ...extra });
+  const box = (w, h, d, x, y, z, mat, ry = 0) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y, z); m.rotation.y = ry; m.castShadow = true; m.receiveShadow = true;
+    scene.add(m); return m;
+  };
+  const woodM = M(0x6b4a2f, .72), woodD = M(0x4a3220, .7), cloth = M(0x6d7f8c, .96), clothL = M(0x8496a2, .96);
+
+  // 窗（+Z 墙）：外面是夜景，加窗框、十字档和两边窗帘
+  {
+    const wx = -1.8, wy = 1.58, ww = 2.15, wh = 1.3, wz = ROOM.z0 + ROOM.D - .05;
+    const view = new THREE.Mesh(new THREE.PlaneGeometry(ww, wh), new THREE.MeshBasicMaterial({ map: cityViewTex() }));
+    view.position.set(wx, wy, wz); view.rotation.y = Math.PI; scene.add(view);
+    for (const [w, h, x, y] of [
+      [ww + .18, .1, wx, wy + wh / 2 + .05], [ww + .18, .1, wx, wy - wh / 2 - .05],
+      [.1, wh + .18, wx - ww / 2 - .05, wy], [.1, wh + .18, wx + ww / 2 + .05, wy],
+      [.06, wh, wx, wy], [ww, .06, wx, wy]])
+      box(w, h, .12, x, y, wz - .04, woodD);
+    const curt = M(0x8d5f63, .98);
+    const rodY = wy + wh / 2 + .26;                 // 杆的高度，窗帘从杆上垂下来
+    for (const sx of [-1, 1]) box(.34, 2.0, .07, wx + sx * (ww / 2 + .18), rodY - 1.0, wz - .1, curt);
+    box(ww + .34, .05, .05, wx, rodY, wz - .1, M(0x2f2a26, .5, { metalness: .5 }));
+  }
+  // 挂画（+Z 墙）
+  {
+    const x = -4.3, y = 1.62, z = ROOM.z0 + ROOM.D - .06;
+    box(.78, .58, .05, x, y, z, woodD);
+    const [c, g] = cv(128, 96);
+    g.fillStyle = '#2f4a5e'; g.fillRect(0, 0, 128, 96);
+    g.fillStyle = '#c96a4a'; g.beginPath(); g.arc(88, 34, 20, 0, 7); g.fill();
+    g.fillStyle = '#3f6b4a'; g.beginPath(); g.moveTo(0, 96); g.lineTo(38, 44); g.lineTo(74, 96); g.closePath(); g.fill();
+    g.fillStyle = '#5b8a63'; g.beginPath(); g.moveTo(52, 96); g.lineTo(92, 52); g.lineTo(128, 96); g.closePath(); g.fill();
+    const pic = new THREE.Mesh(new THREE.PlaneGeometry(.68, .48), new THREE.MeshBasicMaterial({ map: tex(c, [1, 1]) }));
+    pic.position.set(x, y, z - .035); pic.rotation.y = Math.PI; scene.add(pic);
+  }
+  // 门（-X 墙）
+  {
+    const z = DOOR.z, x = ROOM.x0 + .06;
+    box(.07, 2.08, 1.0, x, 1.04, z, M(0x7d5a3c, .68));
+    box(.09, 2.24, .1, x - .02, 1.12, z - .55, woodD);
+    box(.09, 2.24, .1, x - .02, 1.12, z + .55, woodD);
+    box(.09, .1, 1.2, x - .02, 2.19, z, woodD);
+    const knob = new THREE.Mesh(new THREE.SphereGeometry(.05, 10, 8), M(0xc9a24a, .35, { metalness: .8 }));
+    knob.position.set(x + .06, 1.05, z + .38); scene.add(knob);
+  }
+  // 沙发（靠 +Z 墙，面朝室内）
+  {
+    const sx = 2.4, sz = ROOM.z0 + ROOM.D - .55;
+    box(2.2, .42, .95, sx, .26, sz, cloth);
+    box(2.2, .78, .24, sx, .62, sz + .42, cloth);
+    for (const s of [-1, 1]) box(.24, .62, .95, sx + s * 1.04, .4, sz, cloth);
+    for (const s of [-1, 1]) box(.86, .16, .78, sx + s * .48, .54, sz - .05, clothL);
+    for (const s of [-1, 1]) box(.34, .34, .12, sx + s * .72, .74, sz + .28, clothL, s * .2);
+    for (const s of [-1, 1]) box(.1, .18, .1, sx + s * .95, .09, sz + .4, woodD);
+    block(sx - 1.2, sx + 1.2, sz - .5, ROOM.z0 + ROOM.D);
+  }
+  // 地毯 + 茶几（沙发前）
+  {
+    const tx = 2.4, tz = ROOM.z0 + ROOM.D - 2.0;
+    const rug = new THREE.Mesh(new THREE.PlaneGeometry(3.3, 2.3), new THREE.MeshStandardMaterial({ map: rugTex(), roughness: .98 }));
+    rug.rotation.x = -Math.PI / 2; rug.position.set(tx, .01, tz + .3); rug.receiveShadow = true; scene.add(rug);
+    box(1.2, .07, .62, tx, .45, tz, woodM);
+    for (const s of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) box(.07, .44, .07, tx + s[0] * .53, .22, tz + s[1] * .24, woodD);
+    const mug = new THREE.Mesh(new THREE.CylinderGeometry(.05, .045, .1, 12), M(0xe6e2da, .6));
+    mug.position.set(tx - .3, .54, tz + .1); mug.castShadow = true; scene.add(mug);
+    const plate = new THREE.Mesh(new THREE.CylinderGeometry(.13, .12, .025, 16), M(0xd8dfe8, .5));
+    plate.position.set(tx + .28, .5, tz - .05); plate.castShadow = true; scene.add(plate);
+    block(tx - .62, tx + .62, tz - .35, tz + .35);
+  }
+  // 电视柜 + 电视（靠 -Z 墙，正对沙发）
+  {
+    const tx = 2.4, tz = ROOM.z0 + .32;
+    box(1.9, .5, .46, tx, .25, tz, woodM);
+    box(1.44, .84, .07, tx, 1.0, tz + .06, M(0x16181d, .5));
+    const scr = new THREE.Mesh(new THREE.PlaneGeometry(1.32, .72),
+      new THREE.MeshStandardMaterial({ color: 0x0d1420, roughness: .25, metalness: .1, emissive: 0x1b355c, emissiveIntensity: .55 }));
+    scr.position.set(tx, 1.0, tz + .105); scene.add(scr);
+    tvScreen = scr;
+    box(.5, .06, .3, tx, .55, tz + .06, M(0x22262d, .5));
+    block(tx - 1.0, tx + 1.0, ROOM.z0, tz + .28);
+  }
+  // 书柜（+X 墙）
+  {
+    const bx = ROOM.x0 + ROOM.W - .28, bz = -2.0;
+    box(.46, 2.0, 1.7, bx, 1.0, bz, woodM);
+    for (let i = 0; i < 3; i++) box(.4, .04, 1.6, bx - .02, .5 + i * .5, bz, woodD);
+    const cols = [0xb4523f, 0x3f7bb4, 0x6bb457, 0xd0a94a, 0x8a5fb4];
+    for (let i = 0; i < 3; i++) for (let k = 0; k < 7; k++) {
+      const h = rand(.2, .34);
+      box(.3, h, .07 + Math.random() * .05, bx - .02, .52 + i * .5 + h / 2, bz - .68 + k * .2 + rand(-.02, .02), M(cols[(i + k) % cols.length], .85));
+    }
+    block(bx - .3, ROOM.x0 + ROOM.W, bz - .9, bz + .9);
+  }
+  // 落地灯（沙发旁角落）
+  {
+    const x = -4.3, z = 3.6;
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(.2, .22, .04, 16), M(0x2f2a26, .5, { metalness: .4 }));
+    base.position.set(x, .02, z); base.castShadow = true; scene.add(base);
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(.025, .025, 1.45, 8), M(0x2f2a26, .5, { metalness: .5 }));
+    pole.position.set(x, .75, z); pole.castShadow = true; scene.add(pole);
+    const sh = new THREE.Mesh(new THREE.ConeGeometry(.24, .3, 20, 1, true),
+      new THREE.MeshStandardMaterial({ color: 0xf2e2c2, roughness: .6, side: THREE.DoubleSide, emissive: 0xffc98a, emissiveIntensity: .55 }));
+    sh.position.set(x, 1.58, z); scene.add(sh);
+    block(x - .26, x + .26, z - .26, z + .26);
+  }
+  // 角落纸箱 + 垃圾桶 + 几个易拉罐
+  {
+    const M0 = M(0xa88257, .95);
+    box(.7, .55, .7, -4.5, .28, -5.4, M0, .2);
+    box(.55, .45, .55, -4.2, .78, -5.1, M0, -.3);
+    const bin = new THREE.Mesh(new THREE.CylinderGeometry(.2, .17, .62, 14), M(0x3c4650, .6, { metalness: .3 }));
+    bin.position.set(-4.6, .31, -.2); bin.castShadow = true; scene.add(bin);
+    for (let i = 0; i < 4; i++) {
+      const can = new THREE.Mesh(new THREE.CylinderGeometry(.045, .045, .12, 10), M(pick([0xd2554a, 0x4ac0d2, 0xd8c25a]), .4, { metalness: .35 }));
+      const a = rand(0, 7);
+      can.position.set(-4.2 + Math.cos(a) * rand(.2, .9), .06, .4 + Math.sin(a) * rand(.2, .9));
+      can.rotation.z = Math.PI / 2; can.castShadow = true; scene.add(can);
+    }
+    block(-4.95, -3.85, -5.85, -4.75);
+  }
+}
+buildRoom();
+buildMotes();
+
+// ---------------------------------------------------------------- 7. 特效池
+const fx = { bills: [], sparks: [], pops: [], dust: [] };
+const BILL_GEO = new THREE.PlaneGeometry(.17, .085);
+const playerPosScratch = new THREE.Vector3();
+function spawnBill(pos, vel, life = 6, value = 0) {
+  const m = new THREE.Mesh(BILL_GEO, new THREE.MeshBasicMaterial({ map: BILL_TEX, side: THREE.DoubleSide, transparent: true }));
+  m.position.copy(pos);
+  m.userData = { v: vel, t: 0, life, value, spin: new THREE.Vector3(rand(-9, 9), rand(-7, 7), rand(-9, 9)) };
+  scene.add(m); fx.bills.push(m);
+}
+function spawnPop(text, color, pos, scale = 1) {
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex(popTex(text, color)), transparent: true, depthTest: false }));
+  sp.position.copy(pos); sp.scale.set(1.7 * scale, .64 * scale, 1);
+  sp.userData = { t: 0, life: .95, vy: rand(1.4, 2.1), sc: scale };
+  scene.add(sp); fx.pops.push(sp);
+}
+// 扬尘贴图：一团中心实、边缘化开的白色软圆，再叠几团偏心小圆，
+// 轮廓就不规整了。材质带 color，所以同一张图能染成灰白（踢地）或暗红（打中）。
+function puffTex() {
+  const [c, g] = cv(96, 96);
+  const gr = g.createRadialGradient(48, 48, 2, 48, 48, 46);
+  gr.addColorStop(0, 'rgba(255,255,255,.95)'); gr.addColorStop(.45, 'rgba(255,255,255,.45)');
+  gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 96, 96);
+  for (let i = 0; i < 7; i++) {
+    const x = 48 + rand(-22, 22), y = 48 + rand(-22, 22), r = rand(10, 22);
+    const g2 = g.createRadialGradient(x, y, 1, x, y, r);
+    g2.addColorStop(0, 'rgba(255,255,255,.30)'); g2.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = g2; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+  }
+  return tex(c);
+}
+const PUFF_TEX = puffTex();
+function spawnDust(pos, n = 10, color = 0xb9c4d6) {
+  for (let i = 0; i < n; i++) {
+    // 以前是一堆小方块，看着像撒了把绿色药片。软圆 Sprite 永远正对镜头，
+    // 加上下面的"边飞边变大、平方衰减"，才是扬起来的一团灰。
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: PUFF_TEX, color, transparent: true, opacity: .8, depthWrite: false }));
+    const sz = rand(.10, .24);
+    sp.position.copy(pos).add(new THREE.Vector3(rand(-.1, .1), rand(-.06, .12), rand(-.1, .1)));
+    sp.scale.set(sz, sz, 1);
+    sp.userData = { v: new THREE.Vector3(rand(-1.6, 1.6), rand(.4, 2.2), rand(-1.6, 1.6)), t: 0, life: rand(.35, .7), sz };
+    scene.add(sp); fx.dust.push(sp);
+  }
+}
+function updateFx(dt) {
+  for (let i = fx.bills.length - 1; i >= 0; i--) {
+    const b = fx.bills[i], u = b.userData;
+    u.t += dt; u.v.y -= 7.6 * dt; u.v.multiplyScalar(1 - 1.1 * dt);
+    b.position.addScaledVector(u.v, dt);
+    b.rotation.x += u.spin.x * dt; b.rotation.y += u.spin.y * dt; b.rotation.z += u.spin.z * dt;
+    if (b.position.y < .02) { b.position.y = .02; u.v.y *= -.28; u.v.x *= .6; u.v.z *= .6; u.spin.multiplyScalar(.4); }
+    // 飘 2 秒后自动往玩家怀里飞，避免走开就"钱没了"
+    if (u.t > 2) {
+      const pull = new THREE.Vector3().subVectors(player.pos.clone().setY(.9), b.position)
+        .normalize().multiplyScalar((u.t - 2) * 5 * dt);
+      u.v.add(pull);
+    }
+    const dp = b.position.distanceTo(playerPosScratch.set(player.pos.x, .6, player.pos.z));
+    if (dp < .95 || u.t > u.life) {
+      if (u.value > 0) addMoney(u.value, false);
+      scene.remove(b); b.material.dispose(); fx.bills.splice(i, 1);
+    }
+  }
+  for (let i = fx.pops.length - 1; i >= 0; i--) {
+    const p = fx.pops[i], u = p.userData; u.t += dt;
+    p.position.y += u.vy * dt; u.vy *= (1 - 1.6 * dt);
+    const k = 1 - u.t / u.life;
+    p.material.opacity = clamp(k * 1.6, 0, 1);
+    const g = 1 + (1 - k) * .5;
+    p.scale.set(1.7 * u.sc * g, .64 * u.sc * g, 1);
+    if (u.t > u.life) { scene.remove(p); p.material.map.dispose(); p.material.dispose(); fx.pops.splice(i, 1); }
+  }
+  for (let i = fx.dust.length - 1; i >= 0; i--) {
+    const d = fx.dust[i], u = d.userData; u.t += dt;
+    u.v.y -= 1.8 * dt; u.v.multiplyScalar(1 - 1.4 * dt);   // 空气阻尼，不然尘片会一直往外飘
+    d.position.addScaledVector(u.v, dt);
+    if (d.position.y < .03) { d.position.y = .03; u.v.y *= -.25; }
+    const k = 1 - u.t / u.life;
+    d.material.opacity = .8 * k * k;                        // 平方衰减，散得比线性柔和
+    const g = u.sz * (1 + (1 - k) * 1.5);                   // 边散边摊开
+    d.scale.set(g, g, 1);
+    // 只 dispose 材质：PUFF_TEX 是所有尘片共用的一张图，删了后面的粒子就没贴图了
+    if (u.t > u.life) { scene.remove(d); d.material.dispose(); fx.dust.splice(i, 1); }
+  }
+  // 接触阴影跟着人走（updateFx 正好在角色位置更新之后跑）
+  moveAO(player.ao, player.pos);
+  for (const e of enemies) moveAO(e.ao, e.pos);
+  if (tvScreen) tvScreen.material.emissiveIntensity = .5 + Math.sin(perf * 2.3) * .05 + Math.random() * .03;
+  driftMotes(dt);
+}
+// ---------------------------------------------------------------- 8. 玩家
+// 演员表是写死的：主角主角，坏人坏人A（下头男）、坏人B（出生）。
+// 名字、后缀、照片都不给玩家改，所以整个游戏没有任何"输入姓名/上传照片"的入口。
+const HERO_NAME = '主角';
+// 两个坏人的体型、衣服和嘴硬台词。tag 就是名字后面那个固定后缀，
+// 名牌、锁定条、收款弹窗全都读 e.name，所以后缀拼在 name 里就够了。
+const GOON_TYPES = [
+  { tag: '下头男', shirt: 0x2e4a5e, pants: 0x1f2430, skin: 0xc4906a, hair: 0x101010, belly: .2,  jacket: false, cap: false, lines: ['我这条件你踹我？', '别不知好歹', '哥我错了，别拍了'] },
+  { tag: '出生',   shirt: 0x50353a, pants: 0x2b2126, skin: 0xd8ab84, hair: 0x1a140f, belly: .45, jacket: true,  cap: false, lines: ['你等着，我记着呢', '有话好说', '给给给，钱给你'] },
+];
+// 挨踹之后抱头乱窜时喊的，和 type.lines（平时嘴硬的）分开一组，别混用
+const PANIC_LINES = ['妈呀！', '别踹了！', '我错了我错了！', '救命啊！', '钱！钱我给你！', '别过来！'];
+
+/* <<FACES>> 这一整块由 build-faces.mjs 生成：它把 faces/a.txt、faces/b.txt 里
+   那两段 base64 原样写进来，所以照片是嵌在 index.html 里的，整个游戏仍然只有一个文件。
+   想换脸：替换 faces/*.txt 再跑一次 node build-faces.mjs，别手改这一行。 */
+const FACES = {
+  a: '',
+  b: '',
+  c: '',
+};
+/* /FACES>> */
+
+// x 的正负看的是"玩家眼里的左右"：镜头在玩家背后朝 +Z 看，屏幕右 = 世界 -X，
+// 所以屏幕左边反而是 x 为正 —— 坏人A站左边就写 +1.5。
+// 站位为什么是这两个数：镜头朝 +Z 看，屏幕左边 = 世界 +X，所以坏人A x 为正、坏人B x 为负。
+// 家具是有碰撞盒的：沙发在 x[1.2,3.6]、z[3.55,4.6]，茶几在它前面一点。
+// 原来写的 (1.5, 3.8) 正好落在沙发里，人一进去就被家具挡回去随机选点，开局反而看不见左边那位。
+const CAST = [
+  // crop 是照着两张原图量的：fx/fy = 脸中心（占宽/占高的比例），side = 取景方框边长（占短边比例）。
+  // 两张都是 640x854，脸（发际线到下巴）都约占 59% 高，所以 side 给 0.90 ≈ 1.15 倍脸高，
+  // 剩下的背景、肩膀、衣服全部裁掉，脸才够大够显眼。
+  { key: 'a', name: '坏人A', type: GOON_TYPES[0], height: 1.78, x: 1.05, z: 2.55,
+    crop: { fx: .50, fy: .375, side: .90 },
+    fit: { scale: 1.06, ox: 0, oy: 0, bright: 1.22, round: .3 }, canvas: null, avatar: '' },
+  { key: 'b', name: '坏人B', type: GOON_TYPES[1], height: 1.72, x: -1.35, z: 3.15,
+    crop: false,          // 要求保留整张原图：不裁切、不羽化，等比塞进贴片
+    fit: { scale: 1.06, ox: 0, oy: 0, bright: 1.3, round: .3 }, canvas: null, avatar: '' },
+];
+for (const c of CAST) c.full = c.name + '（' + c.type.tag + '）';
+
+// 没有照片的人（主角、底脸）用的默认贴片参数：完全不缩放、不偏移
+const NEUTRAL_FIT = { scale: 1, ox: 0, oy: 0, bright: 1, round: .3 };
+
+function applyFaceOpts(rig) {
+  const f = rig.face, s = rig.s, fit = rig.faceFit || NEUTRAL_FIT;
+  f.scale.set(fit.scale * 1.02, fit.scale * 1.22, 1.06);
+  f.position.x = fit.ox / 900;
+  f.position.y = .02 * s + fit.oy / 900;
+  rig.faceMat.color.setScalar(clamp(fit.bright, .3, 2));
+  // 照片脸：① 把 3D 鼻子收回去——它是根凸出贴片 2cm 的锥体，照片一贴就糊在嘴上，
+  // 近看像嘴唇上长了块肉；程序脸没有照片，鼻子留着才有立体感。
+  // ② 补一点自发光：室内暖光照不到正对镜头的那半边脸，照片容易发灰，
+  // 用同一张图当 emissiveMap 提 0.14，脸立刻从背景里跳出来，又不会亮到失真。
+  if (rig.nose) rig.nose.visible = !rig.photoFace;
+  if (rig.photoFace) {
+    rig.faceMat.emissiveMap = f.material.map;
+    rig.faceMat.emissive.setRGB(.14, .13, .12);
+  } else {
+    rig.faceMat.emissiveMap = null;
+    rig.faceMat.emissive.setRGB(0, 0, 0);
+  }
+  rig.faceMat.needsUpdate = true;
+}
+
+
+const player = {
+  rig: makeHumanoid({ height: 1.8, shirt: 0x223a63, pants: 0x1b202b, skin: 0xd3a880, hair: 0x171310, jacket: true, faceAngry: false }),
+  pos: new THREE.Vector3(0, 0, 1), yaw: 0, vy: 0,
+  speed: 0, state: 'idle', pose: basePose(), tgt: basePose(),
+  act: null,                 // 当前动作 {kind,t,dur,hit}
+  step: 0, lastPaid: null,
+  combo: 0, comboT: 0, money: 0, moneyShown: 0, ko: 0
+};
+scene.add(player.rig.root);
+player.ao = makeAO(player.rig.s);                        // 脚下的接触阴影
+player.rig.root.rotation.order = 'YXZ';
+player.baseFace = player.rig.face.material.map.image;   // 主角的脸就是程序画的那张正派脸
+player.avatar = player.baseFace.toDataURL('image/jpeg', .86);   // 角色面板和整蛊截图共用这张
+player.name = HERO_NAME;                                // 名字写死在演员表里，界面上没有输入框
+// 玩家的名牌往右挪 0.62m：镜头在玩家正后方，坏人又常站在玩家正前方，
+// 两块牌子同高同列会糊在一起（名牌是 Sprite，关掉深度测试永远画在最上层）。
+setNameTag(player.rig.root, player.name, '#3ecf8e', player.rig.s, .62);
+
+// 玩家动作参数：kind -> {dur, 命中帧区间, 距离, 扇形角, 伤害}
+const KICKS = {
+  front: { dur: .50, hit0: .34, hit1: .54, reach: 1.62, arc: 62, dmg: 1, name: '正踹' },
+  spin:  { dur: .72, hit0: .44, hit1: .62, reach: 1.95, arc: 95, dmg: 2, name: '回旋踢' },
+};
+
+// ---------------------------------------------------------------- 9. 坏人
+const enemies = [];
+// 每位演员被打服离场后，什么时候回来（秒，主循环的 perf 时间轴）
+const castBack = CAST.map(() => 0);
+
+// 坏人在房间里挑一个"自己的位置"：离玩家至少 3m、不落在家具里
+function homeSpot() {
+  for (let i = 0; i < 40; i++) {
+    const x = rand(ROOM.x0 + 1.1, ROOM.x0 + ROOM.W - 1.1), z = rand(ROOM.z0 + 1.1, ROOM.z0 + ROOM.D - 1.1);
+    if ((x - player.pos.x) ** 2 + (z - player.pos.z) ** 2 < 9) continue;
+    if (OBST.some(b => x > b.x0 - .7 && x < b.x1 + .7 && z > b.z0 - .7 && z < b.z1 + .7)) continue;
+    return new THREE.Vector3(x, 0, z);
+  }
+  return new THREE.Vector3(ROOM.x0 + 1.4, 0, ROOM.z0 + ROOM.D - 2.4);
+}
+
+// 两位演员的开局站位是写死的（一个屏幕左、一个屏幕右）。家具是有碰撞盒的，所以这里
+// 沿着"同一侧"前后挪一挪，直到落脚点既不在家具里、也不贴着玩家。
+// 关键是绝不退回随机点：随机点要求离玩家 3m 以上，一被家具挡到就容易把人丢到玩家背后，
+// 开局就变成"右边有人、左边没人"，演员表里的左右就对不上了。
+function castSpot(ch) {
+  const bad = (p) => (OBST.some(b => p.x > b.x0 - .7 && p.x < b.x1 + .7 && p.z > b.z0 - .7 && p.z < b.z1 + .7))
+    || Math.hypot(p.x - player.pos.x, p.z - player.pos.z) < 1.6;
+  for (const d of [0, -.3, .3, -.6, .6, -.9, .9, -1.2, 1.2]) {
+    const p = new THREE.Vector3(ch.x, 0, ch.z + d);
+    if (p.z < ROOM.z0 + 1.1 || p.z > ROOM.z0 + ROOM.D - 1.1) continue;
+    if (!bad(p)) return p;
+  }
+  return new THREE.Vector3(ch.x, 0, ch.z);
+}
+
+function spawnEnemy(ci) {
+  const ch = CAST[ci], type = ch.type;
+  const rig = makeHumanoid({
+    height: ch.height, shirt: type.shirt, pants: type.pants, skin: type.skin,
+    hair: type.hair, belly: type.belly, jacket: type.jacket
+  });
+  // 底脸永远是程序画的那一张（肤色跟着身体走），照片只是"贴"在上面的覆盖层。
+  // 这样万一 data URI 没解出来（文件被截断、解码失败），人也还有一张正常的脸。
+  const faceCv = sketchyFace(Math.random() * 1000, true, type.skin);
+  setFaceTexture(rig.face, ch.canvas || faceCv);
+  rig.faceFit = ch.fit;
+  rig.photoFace = !!ch.canvas;
+  applyFaceOpts(rig);
+  if (type.cap) { // 鸭舌帽
+    const capM = new THREE.Mesh(new THREE.SphereGeometry(.125 * rig.s, 14, 10, 0, 7, 0, Math.PI * .55),
+      new THREE.MeshStandardMaterial({ color: 0x151a22, roughness: .8 }));
+    capM.position.set(0, .07 * rig.s, 0); capM.scale.set(1, .9, 1.05); rig.j.head.add(capM);
+    const brim = new THREE.Mesh(new THREE.BoxGeometry(.2 * rig.s, .02 * rig.s, .14 * rig.s), capM.material);
+    // 帽檐抬高、收短、放平：下沿刚好压在眉线上，不挡住眼睛和贴进去的照片
+    brim.position.set(0, .10 * rig.s, .13 * rig.s); brim.rotation.x = .08; rig.j.head.add(brim);
+    capM.castShadow = brim.castShadow = true;
+  }
+  const home = castSpot(ch), homeYaw = Math.atan2(RC.x - home.x, RC.z - home.z);
+  const e = {
+    rig, type, faceCv, char: ch, ci, home, homeYaw,
+    baseName: ch.full, name: ch.full,
+    pos: home.clone(),
+    yaw: homeYaw, hp: type.belly > .6 ? 5 : 4, maxHp: type.belly > .6 ? 5 : 4,
+    wallet: randi(380, 1680), state: 'idle', t: 0, pose: basePose(), tgt: basePose(),
+    vel: new THREE.Vector3(), hitFlash: 0, bubble: null, bubbleText: '', payDone: false, pay: null, dead: false,
+    tilt: 0, lift: 0, spinDir: Math.random() < .5 ? -1 : 1
+  };
+  rig.root.rotation.order = 'YXZ';
+  e.hp = e.maxHp;
+  scene.add(rig.root);
+  e.ao = makeAO(rig.s);
+  setNameTag(rig.root, e.name, '#e0555a', rig.s, 0, GOON_TAG_Y);
+  enemies.push(e);
+  say(e, pick(['滚远点', '你瞅啥', '这是我的地盘', '想要钱？做梦']));
+  return e;
+}
+
+function say(e, text) {
+  if (!e.bubble) {
+    const m = new THREE.SpriteMaterial({ transparent: true, depthTest: false });
+    e.bubble = new THREE.Sprite(m);
+    e.bubble.scale.set(1.5, .47, 1);
+    e.bubble.center.set(.5, 0);
+    e.rig.root.add(e.bubble);
+  }
+  if (e.bubbleText === text) return;
+  e.bubbleText = text;
+  const t = tex(bubbleTex(text, e.state === 'pay' ? '#0a8a44' : '#b02020'));
+  if (e.bubble.material.map) e.bubble.material.map.dispose();
+  e.bubble.material.map = t; e.bubble.material.needsUpdate = true;
+  e.bubble.userData.life = 2.4;
+  e.bubble.position.set(0, GOON_TAG_Y * e.rig.s + .34, 0);   // 比抬高后的名牌顶边再往上一点，两层字不叠
+}
+
+// 头顶名牌。用 Sprite 是因为它天然正对摄像机，不用自己算朝向；
+// 挂在 rig.root 而不是 head 上，否则头一转名字就跟着甩出去。
+// y 是牌子离根的高度（米，再乘体型 s）：坏人的牌子比玩家高 0.5m。
+// 摄像机基本和头顶齐平，两块的牌子在同一水平线上时，不管远近都会糊在一起
+// （开局坏人A的"坏人A（下头男）"被玩家自己的"主角"压掉半截就是这个），
+// 错开一层高度才彻底解决。
+function setNameTag(root, text, accent, s, dx, y) {
+  let sp = root.userData.tag;
+  if (!sp) {
+    sp = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: false }));
+    sp.center.set(.5, 0);
+    sp.scale.set(1.12, .28, 1);        // 画布 512x128 是 4:1，高度固定 0.28m，宽度按比例
+    root.add(sp); root.userData.tag = sp;
+  }
+  const t = tex(nameTagTex(text, accent));
+  if (sp.material.map) sp.material.map.dispose();
+  sp.material.map = t; sp.material.needsUpdate = true;
+  sp.position.set((dx || 0) * s, (y || 1.80) * s, 0);   // 画布上下各留了约 30px 透明边，胶囊实际悬在锚点上方一点
+  return sp;
+}
+// 远处的名牌淡出，免得满屏都是字
+const tagScratch = new THREE.Vector3();
+const GOON_TAG_Y = 2.32;                     // 坏人牌子的高度，比玩家那块的 1.80 高一档
+function fadeTag(sp, x, z, s) {
+  if (!sp) return;
+  tagScratch.set(x, sp.position.y, z);       // 按各自的高度算距离，别统一用 1.8
+  const d = camera.position.distanceTo(tagScratch);
+  sp.material.opacity = clamp((8.5 - d) / 2.2, 0, 1);
+  sp.visible = sp.material.opacity > .02;
+}
+function updateTags() {
+  for (const e of enemies) fadeTag(e.rig.root.userData.tag, e.pos.x, e.pos.z, e.rig.s);
+  fadeTag(player.rig.root.userData.tag, player.pos.x, player.pos.z, player.rig.s);
+}
+
+function removeEnemy(e) {
+  e.dead = true;
+  const i = enemies.indexOf(e); if (i >= 0) enemies.splice(i, 1);
+  // 演员表只有这两位，离场几秒后还得回场上，不然房间就空了
+  if (e.ci !== undefined) castBack[e.ci] = perf + rand(5, 9);
+  if (e.bubble) {
+    if (e.bubble.material.map) e.bubble.material.map.dispose();
+    e.bubble.material.dispose();
+    e.rig.root.remove(e.bubble);
+    e.bubble = null;
+  }
+  e.rig.root.traverse(o => { if (o.isMesh && o.geometry) o.geometry.dispose(); });
+  const tg = e.rig.root.userData.tag;
+  if (tg) { if (tg.material.map) tg.material.map.dispose(); tg.material.dispose(); e.rig.root.remove(tg); }
+  scene.remove(e.rig.root);
+  // 接触阴影是单独挂在 scene 下的，记得一起收掉（贴图 AO_TEX 是共用的，不能 dispose）
+  if (e.ao) { scene.remove(e.ao); e.ao.geometry.dispose(); e.ao.material.dispose(); e.ao = null; }
+}
+
+// 坏人状态机
+function updateEnemy(e, dt) {
+  const toP = new THREE.Vector3().subVectors(player.pos, e.pos);
+  const dist = toP.length();
+  const faceYaw = Math.atan2(toP.x, toP.z);
+  e.t += dt;
+  e.hitFlash = Math.max(0, e.hitFlash - dt * 4);
+  e.rig.materials.skinM.color.setHex(e.hitFlash > 0 ? 0xff7a7a : e.type.skin);
+
+  switch (e.state) {
+    case 'idle': {                        // 就在自己那块地方待着，不追人
+      e.vel.set(0, 0, 0);
+      if (mag2(e.pos, e.home) > .36) { e.state = 'back'; e.t = 0; break; }
+      e.yaw = damp(e.yaw, dist < 5.5 ? faceYaw : e.homeYaw, 3.5, dt);
+      e.tgt = idlePose(e.t);
+      if (e.t > 2.4) { e.t = 0; if (Math.random() < .45 && dist < 6.5) say(e, pick(e.type.lines)); }
+      if (dist < 2.6) { e.state = 'taunt'; e.t = 0; }
+      break;
+    }
+    case 'back': {                         // 你走开了他也不跟，慢吞吞回自己位置上
+      const hx = e.home.x - e.pos.x, hz = e.home.z - e.pos.z;
+      if (Math.hypot(hx, hz) < .3) { e.state = 'idle'; e.t = 0; e.vel.set(0, 0, 0); break; }
+      e.yaw = damp(e.yaw, Math.atan2(hx, hz), 6, dt);
+      e.vel.set(Math.sin(e.yaw), 0, Math.cos(e.yaw)).multiplyScalar(1.05);
+      e.tgt = walkPose(e.t * 4.0, .8);
+      if (dist < 2.6) { e.state = 'taunt'; e.t = 0; }
+      break;
+    }
+    case 'taunt': {
+      e.yaw = damp(e.yaw, faceYaw, 8, dt);
+      e.vel.set(0, 0, 0);
+      e.tgt = tauntPose(e.t, e.type.belly);
+      if (e.t > 1.6) { e.t = 0; if (Math.random() < .5) say(e, pick(e.type.lines)); }
+      // 坏人只动嘴不动手：站桩骂人，绝不还手。这是整蛊道具，
+      // "踢到一半被推一下"只会打断节奏，不会增加笑点。
+      if (dist > 3.6) { e.state = 'back'; e.t = 0; }        // 你退开他就回去，不追着跑
+      break;
+    }
+    case 'hurt': {                        // 被踹瞬间
+      if (e.lastPower === 2) e.yaw += dt * 2.4 * e.spinDir;   // 重击会把人踹得转半圈
+      e.tgt = hurtPose(e.t, e.lastPower || 1);
+      if (e.t > .34) {
+        if (e.hp <= 0) { e.state = 'down'; e.t = 0; say(e, pick(['我错了！', '别踢了！', '我给钱！'])); }
+        else { e.state = 'stagger'; e.t = 0; }
+      }
+      break;
+    }
+    case 'stagger': {                     // 踉跄后退
+      e.tgt = staggerPose(e.t);
+      e.vel.multiplyScalar(1 - 4 * dt);
+      e.yaw = damp(e.yaw, faceYaw, 3, dt);
+      if (e.t > .55) {
+        // 只要还没被踹趴，踉跄完就先进"抱头乱窜"。这里不给概率：
+        // 用户要的是"挨一下就会慌"，随机触发只会让人觉得时灵时不灵。
+        e.state = 'panic'; e.t = 0; e.panicT = 0;
+        e.panicDur = rand(1.3, 2.4); e.panicNext = .3;
+        e.panicYaw = Math.atan2(-toP.x, -toP.z) + rand(-.85, .85);   // 背对玩家那一侧起手，再随机歪一点
+        say(e, Math.random() < .3 ? pick(['你敢踹我', '你完了', '报警了啊']) : pick(PANIC_LINES));
+        Sound.groan(rand(1.45, 1.9));
+        dropScareMoney(e);
+      }
+      break;
+    }
+    case 'panic': {                        // 惊慌失措：抱头绕屋子瞎跑一阵
+      e.panicT += dt;
+      if (e.panicT > e.panicNext) {
+        e.panicNext = e.panicT + rand(.26, .62);
+        e.panicYaw += rand(-1.25, 1.25);          // 每零点几秒猛拐一下，无头苍蝇感就在这行
+        if (Math.random() < .3) say(e, pick(PANIC_LINES));
+      }
+      // 快贴墙了就把逃跑方向往屋子中间拽，不然会贴着墙根跑圈，很难踢到
+      const m = 1.2;
+      const nearWall = e.pos.x < ROOM.x0 + m || e.pos.x > ROOM.x0 + ROOM.W - m ||
+                       e.pos.z < ROOM.z0 + m || e.pos.z > ROOM.z0 + ROOM.D - m;
+      if (nearWall) e.panicYaw = dampAngle(e.panicYaw, Math.atan2(RC.x - e.pos.x, RC.z - e.pos.z), 5, dt);
+      e.yaw = dampAngle(e.yaw, e.panicYaw, 10, dt);
+      e.vel.set(Math.sin(e.yaw), 0, Math.cos(e.yaw)).multiplyScalar(3.3 + Math.sin(e.t * 11) * .45);
+      e.tgt = panicPose(e.t, e.type.belly);
+      if (Math.random() < dt * 9) spawnDust(e.pos.clone().setY(.08), 3, 0xa89a86);
+      if (e.panicT > e.panicDur) {
+        e.state = dist < 2.6 ? 'taunt' : 'back'; e.t = 0;
+        if (Math.random() < .55) say(e, pick(e.type.lines));   // 缓过劲来继续嘴硬
+      }
+      break;
+    }
+    case 'down': {                        // 被踢倒，仰面躺
+      e.tgt = fallPose(e.t);
+      e.vel.set(0, 0, 0);
+      if (e.t > 1.15) { e.state = 'kneel'; e.t = 0; say(e, pick(['大哥饶命', '钱都给你', '别踹了行了吧'])); }
+      break;
+    }
+    case 'kneel': {                       // 跪地求饶
+      e.tgt = kneelPose(e.t);
+      e.yaw = damp(e.yaw, faceYaw, 5, dt);
+      if (e.t > 1.15) { e.state = 'pay'; e.t = 0; e.payDone = false; e.pay = null; say(e, '转账到账'); }
+      break;
+    }
+    case 'pay': {                         // 掏钱包撒钱
+      e.tgt = payPose(e.t);
+      e.yaw = damp(e.yaw, faceYaw, 5, dt);
+      if (!e.payDone && e.t > .55) { beginPay(e); e.payDone = true; }
+      updatePay(e, dt);
+      if (e.t > 2.1) { e.state = 'flee'; e.t = 0; }
+      break;
+    }
+    case 'flee': {                         // 连滚带爬往门口跑，到门边就消失
+      const dx = DOOR.x - e.pos.x, dz = DOOR.z - e.pos.z, dd = Math.hypot(dx, dz);
+      const away = Math.atan2(dx, dz);
+      e.yaw = damp(e.yaw, away, 7, dt);
+      e.vel.set(Math.sin(e.yaw), 0, Math.cos(e.yaw)).multiplyScalar(dd > .8 ? 2.9 : 1.4);
+      e.tgt = walkPose(e.t * 7, 1.15);
+      if (dd < .9 || e.t > 6) { removeEnemy(e); }
+      break;
+    }
+  }
+
+  // 位移 + 房间边界 + 家具
+  e.pos.addScaledVector(e.vel, dt);
+  e.pos.x = clamp(e.pos.x, ROOM.x0 + .42, ROOM.x0 + ROOM.W - .42);
+  e.pos.z = clamp(e.pos.z, ROOM.z0 + .42, ROOM.z0 + ROOM.D - .42);
+  unblock(e.pos, .3);
+  // 不要互相穿模
+  for (const o of enemies) {
+    if (o === e) continue;
+    const dd = o.pos.distanceTo(e.pos);
+    if (dd < .7) { const push = new THREE.Vector3().subVectors(e.pos, o.pos).normalize().multiplyScalar((.7 - dd) * .5); e.pos.add(push); }
+  }
+  e.rig.root.position.copy(e.pos);
+  e.rig.root.rotation.y = e.yaw;
+  // 倒地：整具骨架绕脚底 X 轴向后翻倒；同时把根节点抬高 0.10s，
+  // 否则骨盆/后脑会陷进地板（原点在脚底，翻倒后身体半径几乎为 0）
+  const lying = e.state === 'down';
+  const k = smooth(clamp(e.t / .45, 0, 1));
+  e.tilt = damp(e.tilt, lying ? -1.50 * k : 0, 11, dt);
+  e.lift = damp(e.lift || 0, lying ? .10 * e.rig.s * k : 0, 11, dt);
+  e.rig.root.rotation.x = e.tilt;
+  e.rig.root.position.y = e.lift;
+  blendPose(e.pose, e.tgt, 1 - Math.exp(-18 * dt));
+  applyPose(e.rig, e.pose);
+
+  if (e.bubble) {
+    e.bubble.userData.life -= dt;
+    e.bubble.material.opacity = clamp(e.bubble.userData.life * 2, 0, 1);
+    e.bubble.visible = e.bubble.userData.life > 0 && e.state !== 'down';
+  }
+}
+
+// 吓掉钱：乱窜时从兜里飞出一两张。钱掉在地上过两秒照样会自动飘进玩家怀里（见 updateFx），
+// 所以这里只管"撒"，不用管捡；扣掉的数额从 wallet 里走，最后转账时就少这一笔，账目对得上。
+function dropScareMoney(e) {
+  if (e.wallet < 24) return;
+  const n = Math.random() < .4 ? 2 : 1;
+  const hip = new THREE.Vector3(); e.rig.j.hips.getWorldPosition(hip);
+  for (let i = 0; i < n; i++) {
+    const v = Math.round(clamp(rand(18, 55), 10, e.wallet - 10));
+    e.wallet -= v;
+    spawnBill(hip.clone().add(new THREE.Vector3(rand(-.12, .12), rand(.02, .2), rand(-.12, .12))),
+      new THREE.Vector3(rand(-1.6, 1.6), rand(1.8, 3.4), rand(-1.6, 1.6)), 7, v);
+    Sound.tone(rand(760, 1250), .09, .05, 'triangle');
+  }
+  spawnPop('吓掉钱了', '#ffd166', e.pos.clone().setY(2.15), .95);
+  updateTargetBar(e);
+}
+
+// 递钱：一沓钞票飞向玩家。
+// 用仿真时间推进而不是 setTimeout —— 浏览器切到后台会把定时器拖到 1 秒一次，
+// 那样钞票和收款弹窗会迟到甚至漏掉；挂在状态机里就永远和画面同步。
+function beginPay(e) {
+  const total = e.wallet;
+  const n = clamp(Math.round(total / 90), 5, 14);
+  e.pay = { total, n, per: Math.round(total / n), i: 0, t: 0, done: false };
+  e.wallet = 0;
+}
+function updatePay(e, dt) {
+  const q = e.pay; if (!q) return;
+  q.t += dt;
+  while (q.i < q.n && q.t >= q.i * .09) {
+    const i = q.i++;
+    const hand = new THREE.Vector3();
+    e.rig.j.haR.getWorldPosition(hand);
+    const dir = new THREE.Vector3().subVectors(player.pos.clone().setY(1.1), hand).normalize();
+    const v = dir.multiplyScalar(rand(1.8, 3.4)).add(new THREE.Vector3(rand(-.7, .7), rand(2.2, 3.6), rand(-.7, .7)));
+    spawnBill(hand.clone().add(new THREE.Vector3(rand(-.15, .15), rand(0, .2), rand(-.15, .15))), v, 9,
+      i === q.n - 1 ? q.total - q.per * (q.n - 1) : q.per);   // 最后一张补余数，加起来正好 = total
+    Sound.tone(rand(900, 1500), .1, .06, 'triangle');
+  }
+  if (!q.done && q.i >= q.n && q.t >= q.n * .09 + .12) {
+    q.done = true;
+    Sound.cash();
+    showPay(q.total, e.name, e.char);
+    player.ko++; $('koCount').textContent = player.ko;
+  }
+}
+
+// ---------------------------------------------------------------- 7'. 姿势库
+function walkPose(ph, amp = 1) {
+  const s = Math.sin(ph);
+  return P(0, {
+    hips: { py: -.02 + Math.abs(Math.cos(ph)) * .04, pz: 0 },
+    spine: { rx: .07 * amp, ry: -s * .07 * amp },
+    shL: { rx: s * .62 * amp, rz: -.12 }, shR: { rx: -s * .62 * amp, rz: .12 },
+    // 走路时手臂往前摆的那一侧要多弯一点（肘用负值，见 basePose 注释）
+    elL: { rx: -(.35 + Math.max(0, -s) * .45) }, elR: { rx: -(.35 + Math.max(0, s) * .45) },
+    hiL: { rx: -s * .62 * amp }, hiR: { rx: s * .62 * amp },
+    knL: { rx: Math.max(0, s) * .9 * amp + .05 }, knR: { rx: Math.max(0, -s) * .9 * amp + .05 },
+    anL: { rx: -Math.max(0, s) * .3 }, anR: { rx: -Math.max(0, -s) * .3 },
+    head: { ry: s * .05 }
+  });
+}
+function idlePose(t, breathe = 1) {
+  return P(0, {
+    hips: { py: Math.sin(t * 1.8) * .012 },
+    spine: { rx: .03 + Math.sin(t * 1.8) * .012, ry: Math.sin(t * .7) * .05 },
+    // 站桩时手臂别是两根棍子：上一版肩几乎不抬（rx 只有 ±0.05 的呼吸量）、肘只弯 0.28，
+    // 正面看就是两只手垂直贴在腿外侧，像商场模特。这里给一点前倾 + 手肘自然弯 0.6，
+    // 手腕再折 -.18，手就会松松地垂在胯前，是活人的站姿。
+    shL: { rx: -.10 + Math.sin(t * 1.5) * .05, rz: -.18 }, shR: { rx: -.10 + Math.sin(t * 1.5 + 1) * .05, rz: .18 },
+    elL: { rx: -.55 }, elR: { rx: -.52 },
+    haL: { rx: -.18 }, haR: { rx: -.18 },
+    hiL: { rx: -.03, rz: -.02 }, hiR: { rx: .04, rz: .02 },
+    knL: { rx: .08 }, knR: { rx: .1 },
+    head: { ry: Math.sin(t * .55) * .18, rx: Math.sin(t * 1.1) * .04 }
+  });
+}
+function tauntPose(t, belly = 0) {
+  const w = Math.sin(t * 3.2);
+  return P(0, {
+    hips: { py: -.05 + w * .02 },
+    spine: { rx: .16 + belly * .05, ry: w * .1 },
+    neck: { rx: -.12 },
+    // 挑衅 = 两手举到胸前攥拳，身子往前含一点。
+    // 这里翻过两次车：第一次肩肘都给正值（手甩到胯两侧像丧尸），第二次肘给 +1.82，
+    // 数值很大看着像"举拳"，其实方向是往后折的 —— 侧面看小臂从肘部往屁股方向拐，
+    // 就是用户说的"胳膊肘反过来了"。手肘必须用负值（见 basePose 的注释）：
+    // 肩只往前抬 -.22 左右、肘往前折到 -1.85（≈106°），拳头才真的停在胸口前面。
+    shL: { rx: -.22 + w * .06, rz: -.40 }, shR: { rx: -.26 - w * .06, rz: .44 },
+    elL: { rx: -1.85 }, elR: { rx: -1.90 },
+    haL: { rx: -.35 }, haR: { rx: -.38 },
+    hiL: { rx: -.12, rz: -.07 }, hiR: { rx: .1, rz: .07 },
+    knL: { rx: .22 }, knR: { rx: .16 },
+    head: { rx: -.06, ry: w * .1 }
+  });
+}
+function kickPose(kind, ph) {
+  /* 时间轴：0-28% 提膝蓄力 → 28-50% 弹射命中 → 50-100% 收腿落地
+     约定：髋 rx 为负 = 大腿向前摆；膝 rx 为正 = 小腿向后折 */
+  const K = kind === 'spin'
+    ? { hip: 1.62, knee: .10, lean: -.30, side: .30, armL: -.75, armR: .95 }
+    : { hip: 1.38, knee: .05, lean: -.34, side: .06, armL: -.55, armR: -.35 };
+  let wind, ext, back;
+  if (ph < .28) { wind = smooth(ph / .28); ext = 0; back = 0; }
+  else if (ph < .42) { wind = 1; ext = smooth((ph - .28) / .14); back = 0; }   // 14ms 内把膝盖甩直
+  else if (ph < .54) { wind = 1; ext = 1; back = 0; }                            // 接触段
+  else { wind = 1; ext = 1; back = smooth(clamp((ph - .54) / .46, 0, 1)); }      // 收腿
+  const lift = wind * (1 - back);                    // 抬腿总量
+  const snap = ext;                                  // 绷直程度 0=屈膝 1=伸直
+  const p = P(0, {
+    hips: { py: -.05 * lift - .03 * back, pz: .05 * lift },
+    spine: { rx: K.lean * lift, rz: -K.side * lift, ry: 0 },
+    neck: { rx: .18 * lift }, head: { rx: .1 * lift },
+    shL: { rx: K.armL * lift, rz: -.55 * lift },
+    shR: { rx: K.armR * lift, rz: .6 * lift },
+    elL: { rx: -1.15 * lift }, elR: { rx: -1.4 * lift },
+    hiR: { rx: .14 * lift, rz: -.04 * lift }, knR: { rx: .2 * lift }, anR: { rx: -.1 * lift },
+    hiL: { rx: -K.hip * lift, rz: K.side * .55 * lift },
+    knL: { rx: lerp(1.62, K.knee, snap) * (lift > .02 ? 1 : 0) + .05 * (1 - lift) },
+    anL: { rx: -.3 * snap }
+  });
+  if (kind === 'spin') { p.spine.ry = -lift * .55; p.hips.py -= .05 * lift; p.shL.rz = -.95 * lift; }
+  return p;
+}
+function hurtPose(t, power = 1) {
+  const k = clamp(t / .34, 0, 1);
+  const snap = Math.sin(clamp(t / .12, 0, 1) * Math.PI);
+  return P(0, {
+    hips: { py: -.10 * k, pz: -.06 * k },
+    spine: { rx: .55 * power * (snap * .6 + k * .3), rz: .1 * snap },
+    neck: { rx: -.5 * snap }, head: { rx: -.42 * snap, ry: .2 * snap },
+    shL: { rx: -.9 * snap, rz: -.7 * snap }, shR: { rx: -.7 * snap, rz: .9 * snap },
+    elL: { rx: -1.40 }, elR: { rx: -1.60 },
+    hiL: { rx: .25 * k, rz: -.08 * k }, hiR: { rx: -.3 * k, rz: .08 * k },
+    knL: { rx: .5 * k }, knR: { rx: .3 * k }
+  });
+}
+function staggerPose(t) {
+  const k = clamp(t / .55, 0, 1);
+  return P(0, {
+    hips: { py: -.12 + Math.sin(t * 16) * .03 * (1 - k) },
+    spine: { rx: .3 * (1 - k * .5), rz: Math.sin(t * 12) * .12 * (1 - k) },
+    neck: { rx: -.2 }, head: { rx: -.25, ry: Math.sin(t * 9) * .2 },
+    shL: { rx: -.3, rz: -.55 }, shR: { rx: -.2, rz: .65 }, elL: { rx: -1.1 }, elR: { rx: -1.2 },
+    hiL: { rx: -.35 * (1 - k) }, hiR: { rx: .3 * (1 - k) },
+    knL: { rx: .7 * (1 - k) + .1 }, knR: { rx: .4 * (1 - k) + .1 }
+  });
+}
+// 惊慌失措：双手抱头 + 高抬腿小碎步 + 上身左右打摆。
+// 频率给到 13（正常跑是外部把 t 乘 7~10），步子又碎又快才像"乱窜"而不是"跑步"。
+// 符号约定：骨头默认朝 -Y，rotation.x 为负 = 往前/往上抡（抬手靠它），
+// 但膝关节是反向的：正值 = 小腿往后折，所以跑步时膝盖弯曲用的是正数。
+function panicPose(t, belly = 0) {
+  const s = Math.sin(t * 13), c = Math.cos(t * 13);
+  return P(0, {
+    hips: { py: -.05 + Math.abs(c) * .07, rz: s * .05 },
+    spine: { rx: .16 + belly * .1 + c * .06, ry: s * .16 },
+    neck: { rx: -.3 }, head: { rx: -.22 + s * .1, ry: c * .3 },
+    // 抱头：上臂抬到 -2 左右（-3.14 才是正上方），肘往回折 -1.7，小臂就竖在头顶两侧；
+    // rz 把肘往外拐 0.35，轮廓才像"护着脑袋"而不是"举手投降"。
+    shL: { rx: -2.02 + s * .22, rz: -.34 }, shR: { rx: -1.95 - s * .22, rz: .38 },
+    elL: { rx: -1.72 + c * .2 }, elR: { rx: -1.66 - c * .2 },
+    haL: { rx: -.35 }, haR: { rx: -.4 },
+    // 腿：和 walkPose 同一套相位关系（s>0 时左腿往前抬、左膝跟着折），
+    // 只是幅度更大、频率更快，看着才是撒腿就跑而不是散步。
+    hiL: { rx: -s * .78 }, hiR: { rx: s * .78 },
+    knL: { rx: .1 + Math.max(0, s) * 1.3 }, knR: { rx: .1 + Math.max(0, -s) * 1.3 },
+    anL: { rx: -.1 - Math.max(0, s) * .35 }, anR: { rx: -.1 - Math.max(0, -s) * .35 }
+  });
+}
+function fallPose(t) {
+  /* 身体整体由 root.rotation.x 向后翻倒（见 updateEnemy），这里只负责四肢摊开 */
+  const k = smooth(clamp(t / .5, 0, 1));
+  return P(0, {
+    hips: { py: -.05 * k, pz: 0 },
+    spine: { rx: -.14 * k }, neck: { rx: .16 * k }, head: { rx: .1 * k, ry: .3 * k },
+    shL: { rx: -.2 * k, rz: -1.05 * k }, shR: { rx: -.15 * k, rz: 1.15 * k },
+    elL: { rx: -1.0 * k }, elR: { rx: -.95 * k },
+    hiL: { rx: -.55 * k }, hiR: { rx: -.4 * k },
+    knL: { rx: 1.0 * k }, knR: { rx: .8 * k },
+    anL: { rx: -.4 * k }, anR: { rx: -.35 * k }
+  });
+}
+function kneelPose(t) {
+  const w = Math.sin(t * 4);
+  return P(0, {
+    hips: { py: -.38, pz: -.03 },
+    spine: { rx: .28 + w * .04 }, neck: { rx: -.16 }, head: { rx: -.08 - w * .05 },
+    shL: { rx: -1.45 - w * .12, rz: -.3 }, shR: { rx: -1.5 - w * .12, rz: .3 },
+    elL: { rx: -.95 }, elR: { rx: -1.0 },
+    hiL: { rx: -.15, rz: -.07 }, hiR: { rx: -.12, rz: .07 },
+    knL: { rx: 1.6 }, knR: { rx: 1.58 },
+    anL: { rx: .55 }, anR: { rx: .55 }
+  });
+}
+function payPose(t) {
+  const k = smooth(clamp(t / .5, 0, 1));
+  const flick = t > .45 ? smooth(clamp((t - .45) / .25, 0, 1)) : 0;
+  return P(0, {
+    hips: { py: -.38 + .04 * k, pz: -.03 },
+    spine: { rx: .28 - .36 * k }, neck: { rx: -.14 }, head: { rx: -.1 },
+    shL: { rx: lerp(-1.45, -.95, k), rz: -.3 },
+    shR: { rx: lerp(-1.55, -1.62, flick), rz: .3 },
+    elL: { rx: -lerp(.95, .30, k) }, elR: { rx: -lerp(1.0, .35, flick) },
+    haR: { rx: -flick * .5 },
+    hiL: { rx: -.15, rz: -.07 }, hiR: { rx: -.12, rz: .07 },
+    knL: { rx: 1.6 }, knR: { rx: 1.58 },
+    anL: { rx: .55 }, anR: { rx: .55 }
+  });
+}
+function playerHurtPose(t) {   // 保留：以后要加"被推"反馈时直接用，现在没人调用
+  const s = Math.sin(clamp(t / .3, 0, 1) * Math.PI);
+  return P(0, {
+    hips: { py: -.08 * s }, spine: { rx: -.3 * s }, head: { rx: -.3 * s },
+    shL: { rx: -.6 * s, rz: -.5 }, shR: { rx: -.5 * s, rz: .6 }, elL: { rx: -1.2 }, elR: { rx: -1.3 }
+  });
+}
+
+// ---------------------------------------------------------------- 8'. 输入
+const keys = Object.create(null);
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  keys[e.code] = true;
+  const c = e.code;
+  if (c === 'Space' || c === 'KeyJ') { e.preventDefault(); tryKick('front'); }
+  if (c === 'KeyK') tryKick('spin');
+  if (c === 'KeyF') closeup = !closeup;
+  if (c === 'Escape') $('facePanel').classList.add('hidden');
+});
+addEventListener('keyup', e => { keys[e.code] = false; });
+
+// baseFov / distBias 由 resizeNow() 按屏幕方向改写：竖屏手机横向可视范围太窄，
+// 58° 会把坏人怼成一整张脸，所以竖屏放宽视角、同时把跟随距离推远一点。
+let camYaw = 0, camPitch = .18, camDist = 3.35, lastX = 0, lastY = 0, closeup = false;
+// camAuto = 手机自动回正时"镜头比走位基准多转出去的那一点"。
+// 走位方向用的是 (camYaw - camAuto)，所以镜头自己转的时候人物路径不会被带着拐弯。
+// 没有这一层解耦会出大事：dir = 摇杆角度 + camYaw，镜头追人物朝向、人物又追镜头方向，
+// 是个正反馈环，轻轻一推摇杆人就原地绕圈（我在真机上实测到过，一圈约 12 秒）。
+let camAuto = 0;
+let baseFov = 58, distBias = 0;
+let camHold = false;   // 调试时可钉住摄像机（__dbg.cam / __dbg.unhold）
+const dom = renderer.domElement;
+dom.style.touchAction = 'none';        // 不然手机上 pointermove 会被浏览器手势吃掉
+let clickScratch = { x: 0, y: 0, t: 0, id: -1, btn: 0 };
+// 手机上最难处理的是"多指"。老写法里每个 pointerdown 都会覆盖 lastX / clickScratch，
+// 于是左手推着摇杆、右手转一下视角再抬起来，右手那一下会被算成"点击"，莫名其妙踹一脚。
+// 现在用 ptrs 记住每根手指：只有第一根按在画面上的手指（dragId）能转视角和触发点击，
+// 第二根一起来就标记 gesture=true，这一轮的点击全部作废，改做捏合缩放。
+// 触屏摇杆的状态：on 表示手指正按着，x/y 是 -1~1 的方向
+const touch = { on: false, x: 0, y: 0 };
+const ptrs = new Map();
+let dragId = -1, stickId = -1, gesture = false, pinch = null;
+let stickCx = 0, stickCy = 0;
+const st = $('stick'), knob = st.querySelector('i');
+// "画面手指"= 除摇杆那根之外的手指。左手拇指按着走位、右手拇指点一下出脚，
+// 是手机上最自然的组合，所以判定手势/点击时必须先把摇杆那根摘出去，
+// 不然总数一到 2 就当捏合，点屏幕永远踹不出去。
+const viewPtrs = () => { const a = []; for (const [id, p] of ptrs) if (id !== stickId) a.push(p); return a; };
+const pinchDist = a => Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y);
+// 浮动摇杆：拇指按在左下这块区域的任意位置，摇杆圈就搬过去。
+// 要求"点中那个 120px 的圈"在真机上太苛刻——走路时拇指是滑进来的，不是瞄准的。
+const stickZone = (x, y) => isTouch && y > innerHeight * .5 && x < innerWidth * .46;
+function stickShow(x, y) {
+  // 圈的实际尺寸是 CSS 给的（竖屏 120，横屏小屏 104），这里读 offsetWidth，
+  // 写死 60 的话横屏一按，圈的中心就比手指偏出去 8 个像素。
+  const r = st.offsetWidth / 2;
+  st.classList.add('float');
+  st.style.left = (x - r) + 'px'; st.style.top = (y - r) + 'px'; st.style.bottom = 'auto';
+}
+function stickHide() {
+  st.classList.remove('float');
+  st.style.left = st.style.top = st.style.bottom = '';
+  touch.on = false; touch.x = touch.y = 0; knob.style.transform = '';
+}
+function stickMove(x, y) {
+  // 行程半径跟着圈走：手指推到圈的内沿就算满舵，摇杆帽也正好顶到边上
+  // （帽子直径 52，圈半径 60，所以位移最多 60-26=34，也就是 r-14）
+  const r = Math.max(28, st.offsetWidth / 2 - 12);
+  const dx = clamp((x - stickCx) / r, -1, 1), dy = clamp((y - stickCy) / r, -1, 1);
+  touch.x = dx; touch.y = dy;
+  knob.style.transform = `translate(${dx * (r - 14)}px,${dy * (r - 14)}px)`;
+}
+// 镜头偏转：拖拽和"指针锁定"共用一套系数。camYaw 变小 = 视线往屏幕右侧偏，
+// 所以鼠标往右移（dx>0）符号是 -=；dy>0（往下拖）时镜头抬高、变成俯视。
+function lookDelta(dx, dy, k = 1) {
+  camYaw -= dx * .0055 * k;
+  camPitch = clamp(camPitch + dy * .004 * k, -.25, .8);
+}
+dom.addEventListener('pointerdown', e => {
+  // 桌面端鼠标已经接管（指针锁定）时，按下就出脚，不等抬手 —— 手感比原来的
+  // "按下+短按+没移动"三条件判定直接得多，也不会把转镜头误判成踢人。
+  if (locked && e.pointerType === 'mouse') { tryKick(e.button === 2 ? 'spin' : 'front'); return; }
+  // 电脑上第一下点击是"接管鼠标"（进 pointer lock），不是踹人，
+  // 不然每次进游戏都要先误踹一脚才能开始转视角。
+  if (!isTouch && e.pointerType === 'mouse' && lockUsable() && !locked && started) { lockMouse(); return; }
+  // others = 这根手指之外、已经按在画面上的手指（摇杆那根不算）。
+  // 判定必须在 ptrs.set 之前取，否则把自己也算进去，"只有我一根手指"永远不成立。
+  const others = [];
+  for (const id of ptrs.keys()) if (id !== stickId) others.push(id);
+  ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  // 摇杆优先认领，条件是"左下区域 + 画面上没有别的手指在按"：放在捏合判定前面，
+  // 保证摇杆手指永远不会被当成第二根手势指。
+  if (stickId === -1 && others.length === 0 && stickZone(e.clientX, e.clientY)) {
+    stickId = e.pointerId; stickCx = e.clientX; stickCy = e.clientY;
+    touch.on = true; stickShow(e.clientX, e.clientY); stickMove(e.clientX, e.clientY);
+    dom.setPointerCapture(e.pointerId);
+    return;                                     // 这根手指归摇杆，不参与转视角/点击判定
+  }
+  const vp = viewPtrs();
+  if (vp.length === 2) { pinch = { d0: pinchDist(vp), cam0: camDist, last: 1 }; gesture = true; }
+  if (dragId === -1) {
+    dragId = e.pointerId; lastX = e.clientX; lastY = e.clientY;
+    clickScratch = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId, btn: e.button };
+    dom.setPointerCapture(e.pointerId);
+  }
+});
+dom.addEventListener('pointermove', e => {
+  if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (e.pointerId === stickId) { stickMove(e.clientX, e.clientY); return; }
+  const vp = viewPtrs();
+  if (pinch && vp.length >= 2) {                // 两指：捏合 = 拉镜头
+    const k = pinchDist(vp) / pinch.d0;
+    camDist = clamp(pinch.cam0 / k, 1.5, 4.2);
+    pinch.last = k;
+    return;
+  }
+  if (e.pointerId !== dragId) return;
+  const dx = e.clientX - lastX, dy = e.clientY - lastY;
+  lastX = e.clientX; lastY = e.clientY;
+  lookDelta(dx, dy);
+});
+function endPointer(e) {
+  ptrs.delete(e.pointerId);
+  if (e.pointerId === stickId) { stickId = -1; stickHide(); }
+  if (viewPtrs().length < 2) pinch = null;
+  if (e.pointerId === dragId) {
+    dragId = -1;
+    // 单击 = 踢。判据是"这轮画面手指没多过一根 + 没怎么移动 + 按得短"，
+    // 所以拖镜头、长按、双指手势都不会误触发；按住摇杆时点屏幕照旧出脚。
+    if (gesture || viewPtrs().length > 0) return;
+    const moved = Math.hypot(e.clientX - clickScratch.x, e.clientY - clickScratch.y);
+    if (moved > 8 || performance.now() - clickScratch.t > 400) return;
+    tryKick(clickScratch.btn === 2 ? 'spin' : 'front');
+  }
+  if (viewPtrs().length === 0) gesture = false;
+}
+dom.addEventListener('pointerup', endPointer);
+dom.addEventListener('pointercancel', endPointer);
+dom.addEventListener('contextmenu', e => e.preventDefault());   // 右键留给回旋踢，别弹浏览器菜单
+dom.addEventListener('wheel', e => {
+  camDist = clamp(camDist + e.deltaY * .0022, 1.5, 4.2);
+}, { passive: true });
+
+/* ---------------- 桌面端：鼠标即镜头（pointer lock）
+   要求是"电脑版不要有鼠标，移动鼠标就是移动镜头"。浏览器里唯一能做到"光标消失、
+   还能持续拿到位移"的办法就是指针锁定：requestPointerLock() 之后系统光标隐藏，
+   mousemove 不再给绝对坐标，而是给这一帧的 movementX / movementY，
+   于是轻轻推一下鼠标镜头就跟着转，不需要按住左键拖。
+   代价：锁定期间顶部那排按钮（本场角色 / 截图 / 收款 / 全屏）点不到。
+   对策是 Esc 解锁（浏览器原生行为，不用写代码），面板一打开也主动解锁；
+   点画面或关掉面板再锁回去。
+   拿不到锁的情况（iframe 被 sandbox、浏览器不支持、用户拒绝）会静默退回
+   原来的"按住拖动转视角"，游戏照常能玩。 */
+let locked = false;
+const canLock = typeof dom.requestPointerLock === 'function';
+// 有些环境根本拿不到锁：内嵌 iframe 没给 allow="pointer-lock"、页面没焦点、
+// 或者用户刚按过 Esc 还在冷却。连续失败两次就认定"这台机器用不了锁定"，
+// 退回原来的老操作（按住拖动转镜头、点一下出脚），否则每次点击都只抢鼠标
+// 不踹人，等于把攻击键弄丢了。
+let lockFails = 0;
+const lockUsable = () => canLock && lockFails < 2;
+function lockMouse() {
+  if (isTouch || !canLock || locked || !started) return;
+  if (!$('facePanel').classList.contains('hidden')) return;   // 面板开着，别把鼠标抢走
+  const p = dom.requestPointerLock();
+  // 失败只由 pointerlockerror 计数：Promise 被拒绝和 error 事件是同一次失败，
+  // 两边都 +1 的话一次偶发失败（比如刚按 Esc 还在冷却）就永久关掉锁定功能了。
+  if (p && p.catch) p.catch(() => {});
+}
+function unlockMouse() { if (locked && document.exitPointerLock) document.exitPointerLock(); }
+document.addEventListener('pointerlockchange', () => {
+  locked = document.pointerLockElement === dom;
+  if (locked) lockFails = 0;
+});
+document.addEventListener('pointerlockerror', () => { locked = false; lockFails++; });
+addEventListener('mousemove', e => {
+  if (!locked) return;
+  // 锁定后没有"拖到屏幕边缘就停了"这回事，可以一直往一个方向转，
+  // 所以系数压到 .55：横扫一次屏幕大约转一圈，再多就晕了。
+  lookDelta(e.movementX || 0, e.movementY || 0, .55);
+});
+
+// iOS 从后台切回来、或者拨过侧边静音键之后，AudioContext 会被系统挂起，
+// 之后每一脚都没声音。这里每次指针按下都兜一次底：init 内部自己判 suspended，
+// 重复调用没有额外开销。
+addEventListener('pointerdown', () => Sound.init(), { capture: true });
+
+// 触屏 UI
+if (isTouch) {
+  $('touch').classList.remove('hidden');
+  // 摇杆本体不需要监听事件：它已经改成纯视觉（pointer-events:none），
+  // 判定全在上面的 canvas 指针处理里，这样"固定圈"和"浮动圈"走的是同一套代码。
+  const tap = (el, kind) => el.addEventListener('pointerdown', e => {
+    e.preventDefault();                    // 不然手指抬起来还会补一个 click，等于踹两下
+    e.stopPropagation();
+    tryKick(kind);
+  }, { passive: false });
+  tap($('tKick'), 'front');
+  tap($('tSpin'), 'spin');
+  // iPhone 的 Safari 不支持 Fullscreen API，按钮留着只会让人以为坏了
+  if (!document.documentElement.requestFullscreen) $('btnFull').classList.add('hidden');
+  // 启动页那串是键位表，手机上念给谁听都听不明白，直接换成手势说明
+  $('startKeys').innerHTML = `
+    <div><b>点一下画面</b> 正踹（最常用）</div>
+    <div><b>右下角「回旋」</b> 威力更大</div>
+    <div><b>左下按住拖</b> 走位 · <b>拖画面</b> 转视角</div>
+    <div><b>推摇杆时</b> 镜头会慢慢转到你面朝的正面</div>
+    <div><b>两指捏合</b> 拉近拉远</div>
+    <div><b>建议</b> 用浏览器菜单"添加到主屏幕"，全屏更顺手</div>
+    <div><b>挨一脚</b> 坏人会抱头乱窜，跑起来还会从兜里掉钱</div>`;
+}
+
+// 踢击
+function tryKick(kind) {
+  if (!started) return;
+  if (player.act) return;
+  if (player.hurt > 0) return;
+  player.act = { kind, t: 0, dur: KICKS[kind].dur, hit: false };
+  player.faceTarget = nearestEnemy(2.6);
+  if (player.faceTarget) {
+    const d = new THREE.Vector3().subVectors(player.faceTarget.pos, player.pos);
+    player.yaw = Math.atan2(d.x, d.z);
+  }
+  Sound.whoosh();
+}
+
+function nearestEnemy(maxDist) {
+  let best = null, bd = maxDist;
+  for (const e of enemies) {
+    if (e.state === 'down' || e.state === 'pay' || e.state === 'flee') continue;
+    const d = e.pos.distanceTo(player.pos);
+    if (d < bd) { bd = d; best = e; }
+  }
+  return best;
+}
+
+function checkHit(e, spec) {
+  const dx = e.pos.x - player.pos.x, dz = e.pos.z - player.pos.z;
+  if (Math.hypot(dx, dz) > spec.reach) return false;
+  // player.yaw 会随回旋踢/转视角无限累加，用 atan2(sin,cos) 归一化，否则取模会算负数导致永远打不中
+  const a = Math.atan2(dx, dz) - player.yaw;
+  return Math.abs(Math.atan2(Math.sin(a), Math.cos(a))) < spec.arc * Math.PI / 180;
+}
+
+// ---------------------------------------------------------------- 10. 玩家更新
+let hitStop = 0;
+function updatePlayer(dt) {
+  // 输入方向
+  let ix = 0, iy = 0;
+  if (keys.KeyA || keys.ArrowLeft) ix -= 1;
+  if (keys.KeyD || keys.ArrowRight) ix += 1;
+  if (keys.KeyW || keys.ArrowUp) iy += 1;
+  if (keys.KeyS || keys.ArrowDown) iy -= 1;
+  if (isTouch && touch.on) { ix = touch.x; iy = -touch.y; }
+  const run = keys.ShiftLeft || keys.ShiftRight;
+  const mag = Math.hypot(ix, iy);
+  const busy = !!player.act || player.hurt > 0;
+  // 给 updateCamera 用：手机上"正在推滑杆走路"是镜头自动回正的唯一触发条件
+  player.moving = !busy && mag > 0.05;
+
+  if (!busy && mag > 0.05) {
+    // 左右反了就是这一行的符号：镜头在玩家背后朝 +Z 看时，屏幕右半边其实是世界 -X。
+    // 所以侧移输入 ix 必须先取反再进 atan2，否则按 D 往左走、按 A 往右走。
+    // 减 camAuto 是为了让"镜头自动回正"不改变走位方向，详见 camAuto 的注释。
+    const dir = Math.atan2(-ix, iy) + camYaw - camAuto;
+    const sp = (run ? 4.1 : 2.15) * clamp(mag, 0, 1);
+    player.pos.x += Math.sin(dir) * sp * dt;
+    player.pos.z += Math.cos(dir) * sp * dt;
+    player.yaw = dampAngle(player.yaw, dir, 12, dt);
+    player.speed = sp;
+    player.step += dt * (run ? 9 : 6);
+    if (player.step > 1) { player.step = 0; Sound.step(); }
+  } else {
+    player.speed = damp(player.speed, 0, 10, dt);
+  }
+  player.pos.x = clamp(player.pos.x, ROOM.x0 + .4, ROOM.x0 + ROOM.W - .4);
+  player.pos.z = clamp(player.pos.z, ROOM.z0 + .4, ROOM.z0 + ROOM.D - .4);
+  unblock(player.pos, .32);
+  // 别和站着的坏人重叠，轻轻顶开（躺着的不管，不然踢不倒他）
+  for (const e of enemies) {
+    if (e.dead || e.state === 'down') continue;
+    const dx = player.pos.x - e.pos.x, dz = player.pos.z - e.pos.z, dd = Math.hypot(dx, dz);
+    if (dd < .62 && dd > 1e-4) { const k = (.62 - dd) / dd * .5; player.pos.x += dx * k; player.pos.z += dz * k; }
+  }
+
+  player.hurt = Math.max(0, (player.hurt || 0) - dt);
+
+  // 动作
+  let pose;
+  if (player.act) {
+    const A = player.act, spec = KICKS[A.kind];
+    A.t += dt;
+    const ph = clamp(A.t / A.dur, 0, 1);
+    pose = kickPose(A.kind, ph);
+    if (A.kind === 'spin') player.yaw -= dt * 9 * clamp(ph * 2.2, 0, 1);
+    if (!A.hit && ph >= spec.hit0 && ph <= spec.hit1) {
+      for (const e of enemies) {
+        if (e.state === 'down' || e.state === 'pay' || e.state === 'flee') continue;
+        if (checkHit(e, spec)) { A.hit = true; landKick(e, spec); break; }
+      }
+      if (!A.hit && ph >= spec.hit1) { /* 落空 */ }
+    }
+    if (A.t >= A.dur) { player.act = null; }
+  } else if (player.hurt > 0) {
+    pose = playerHurtPose(0.3 - player.hurt);
+  } else if (player.speed > 0.25) {
+    pose = walkPose(perf * (player.speed > 3 ? 10 : 7), clamp(player.speed / 2.4, .6, 1.25));
+  } else {
+    pose = idlePose(perf, 1);
+  }
+  player.rig.root.position.copy(player.pos);
+  player.rig.root.rotation.y = player.yaw;
+  blendPose(player.pose, pose, 1 - Math.exp(-20 * dt));
+  applyPose(player.rig, player.pose);
+
+  // 连击计时
+  if (player.combo > 0) { player.comboT -= dt; if (player.comboT <= 0) { player.combo = 0; updateCombo(); } }
+}
+
+function landKick(e, spec) {
+  const power = spec.dmg;
+  e.hp = Math.max(0, e.hp - power);
+  e.lastPower = power;
+  e.state = 'hurt'; e.t = 0; e.hitFlash = 1;
+  const dir = new THREE.Vector3().subVectors(e.pos, player.pos).setY(0).normalize();
+  e.vel.copy(dir).multiplyScalar(power === 2 ? 5.4 : 3.4);
+  e.pos.addScaledVector(dir, .12);
+  const foot = new THREE.Vector3(); player.rig.j.anL.getWorldPosition(foot);
+
+  player.combo++; player.comboT = 2.6; updateCombo();
+  const dmgText = pick(['踹！', '正中！', '哎哟', '爆头', '膝跳反应']) ;
+  spawnPop(power === 2 ? '回旋重击' : dmgText, power === 2 ? '#ff8fe0' : '#ffd166', foot.clone().add(new THREE.Vector3(0, .5, 0)), power === 2 ? 1.25 : 1);
+  spawnDust(foot.clone().add(new THREE.Vector3(0, .2, 0)), 12);
+  Sound.thud(power === 2 ? 1.3 : 1); Sound.groan(rand(.85, 1.2));
+  hitStop = power === 2 ? .10 : .06;
+  shake(power === 2 ? 1.5 : .9);
+  flash(power === 2 ? .3 : .16, '#ffffff');
+  updateTargetBar(e);
+  if (e.hp === 0) { spawnPop('跪下了', '#07c160', e.pos.clone().setY(2.4), 1.1); }
+}
+
+// ---------------------------------------------------------------- 11. 摄像机
+const camTarget = new THREE.Vector3();
+let shakeAmt = 0;
+function shake(v) { shakeAmt = Math.min(1.6, shakeAmt + v); }
+// 房间是封闭的：镜头既不能穿到墙外，也不能顶进天花板
+function clampCam() {
+  camera.position.x = clamp(camera.position.x, ROOM.x0 + .3, ROOM.x0 + ROOM.W - .3);
+  camera.position.z = clamp(camera.position.z, ROOM.z0 + .3, ROOM.z0 + ROOM.D - .3);
+  camera.position.y = clamp(camera.position.y, .5, ROOM.H - .22);
+}
+function updateCamera(dt) {
+  const look = new THREE.Vector3(player.pos.x, 1.28, player.pos.z);
+  let dist = camDist + distBias;
+  const near = nearestEnemy(3.2);
+
+  // 手机上没有"右手摇杆转镜头"，走两步镜头就甩成侧对着坏人。
+  // 推滑杆时让 camYaw 慢慢追上 player.yaw，把画面带回"从他背后看正面"。
+  // 关键是转出去的量同时记进 camAuto：走位用的是 camYaw - camAuto，
+  // 所以镜头在人物背后绕弧时，人物还在按原来的世界方向走直线，不会变成绕圈。
+  // 阻尼 1.8 = 大约 1.5 秒把夹角收掉大半，够"慢慢"又不至于看半天侧影。
+  // 手指正在拖画面（dragId !== -1）时完全让开，手动优先。
+  if (isTouch && player.moving && dragId === -1) {
+    let g = (player.yaw - camYaw) % (Math.PI * 2);
+    if (g > Math.PI) g -= Math.PI * 2;
+    if (g < -Math.PI) g += Math.PI * 2;
+    const step = g * (1 - Math.exp(-1.8 * dt));
+    camYaw += step; camAuto += step;
+  } else if (!player.moving && camAuto !== 0) {
+    // 停下来再把这点超前量吸收掉，下次推摇杆"上 = 镜头正前方"才对得上直觉
+    camAuto = damp(camAuto, 0, 1.6, dt);
+  }
+
+  if (closeup && near) {
+    // 贴脸特写：站到坏人正前方，怼着他的脸拍
+    const hv = new THREE.Vector3(); near.rig.j.head.getWorldPosition(hv);
+    const fx2 = Math.sin(near.yaw), fz = Math.cos(near.yaw);      // 坏人面朝的方向
+    const want = new THREE.Vector3(hv.x + fx2 * .95, hv.y + .05, hv.z + fz * .95);
+    const k2 = 1 - Math.exp(-7 * dt);
+    camera.position.lerp(want, k2);
+    clampCam();
+    camTarget.lerp(hv, k2);
+    camera.lookAt(camTarget);
+    camera.fov = damp(camera.fov, 30, 6, dt);
+    camera.updateProjectionMatrix();
+    return;
+  }
+
+  if (near && !player.act && mag2(player.pos, near.pos) < 9) {
+    look.lerp(new THREE.Vector3(near.pos.x, 1.2, near.pos.z), .22);
+  }
+  // 过肩视角
+  const yaw = camYaw + (player.act ? 0 : 0);
+  const px = player.pos.x - Math.sin(yaw) * Math.cos(camPitch) * dist;
+  const pz = player.pos.z - Math.cos(yaw) * Math.cos(camPitch) * dist;
+  const py = 1.35 + Math.sin(camPitch) * dist + (player.speed > 3 ? .1 : 0);
+  const k = 1 - Math.exp(-9 * dt);
+  camera.position.x = lerp(camera.position.x, px, k);
+  camera.position.y = lerp(camera.position.y, py, k);
+  camera.position.z = lerp(camera.position.z, pz, k);
+  camTarget.lerp(look, k);
+
+  // 抖动
+  if (shakeAmt > 0.001) {
+    camera.position.x += rand(-1, 1) * shakeAmt * .1;
+    camera.position.y += rand(-1, 1) * shakeAmt * .1;
+    camera.position.z += rand(-1, 1) * shakeAmt * .06;
+    shakeAmt *= Math.pow(.0015, dt);
+  }
+  camera.up.set(0, 1, 0);
+  clampCam();
+  camera.lookAt(camTarget);
+  const wantFov = baseFov + (player.act ? 5 : 0) + (player.speed > 3 ? 5 : 0);
+  camera.fov = damp(camera.fov, wantFov, 7, dt);
+  camera.updateProjectionMatrix();
+}
+const mag2 = (a, b) => (a.x - b.x) ** 2 + (a.z - b.z) ** 2;
+
+// ---------------------------------------------------------------- 12. UI / 钱
+function addMoney(v, pop = true) {
+  player.money += v;
+  if (pop) spawnPop('+' + v, '#7ef0b0', player.pos.clone().setY(2.2), 1);
+}
+function updateCombo() {
+  const el = $('combo');
+  if (player.combo >= 2) { el.classList.remove('hidden'); $('comboNum').textContent = player.combo; el.style.animation = 'none'; void el.offsetWidth; el.style.animation = ''; }
+  else el.classList.add('hidden');
+}
+let flashT = 0, flashColor = '#fff';
+function flash(v, color = '#fff') { flashT = Math.max(flashT, v); flashColor = color; }
+
+let payTimer = 0;
+function showPay(amount, from, ch) {
+  $('payAmount').textContent = amount.toFixed(2);
+  $('payFrom').textContent = from;
+  $('payTime').textContent = new Date().toLocaleString('zh-CN', { hour12: false });
+  $('payAvatar').src = (ch && ch.avatar) || '';
+  // 整蛊截图要沿用同一张脸。这里存抠好的 canvas 而不是 dataURL：
+  // canvas 能直接 drawImage，dataURL 现开 Image 不一定解码完，截图里就少个头像。
+  player.lastPaid = { name: from, canvas: (ch && ch.canvas) || null };
+  $('payPopup').classList.add('show');
+  payTimer = 3.2;
+}
+
+const barCache = { name: '', wallet: -1, hp: -1, shown: null };
+function updateTargetBar(e) {
+  const bar = $('targetBar');
+  if (!e) {
+    if (barCache.shown !== false) { barCache.shown = false; bar.classList.add('hidden'); }
+    return;
+  }
+  if (barCache.shown !== true) { barCache.shown = true; bar.classList.remove('hidden'); }
+  if (e.name !== barCache.name) { barCache.name = e.name; $('tgtName').textContent = e.name; }
+  if (e.wallet !== barCache.wallet) { barCache.wallet = e.wallet; $('tgtWallet').textContent = e.wallet; }
+  const hp = Math.round(e.hp / e.maxHp * 100);
+  if (hp !== barCache.hp) { barCache.hp = hp; $('tgtHp').style.width = hp + '%'; }
+}
+
+// ---- 演员的脸：把嵌在 HTML 里的三张 data URI 抠成正脸贴图 ----
+// 照片和名字都固定，所以这一整段没有上传、没有对位、没有滑块，只剩"解码 → 抠图 → 贴上去"。
+// 裁切用 CAST 里写死的 crop，不走自动找脸：那套是按肤色块取景的，
+// 半身自拍会把肩膀和衣服一起框进来，脸就缩小成一小块，整蛊效果全没。
+// 坏人B要求保留原图，crop 给 false，走"整张等比塞进去"那条分支。
+function loadCastFace(ch) {
+  const img = new Image();
+  img.onload = () => {
+    ch.canvas = fitFaceImage(img, ch.fit.round, true, ch.crop);
+    ch.avatar = ch.canvas.toDataURL('image/jpeg', .86);   // 角色面板和收款弹窗用的圆头像
+    applyCastFaces();
+  };
+  img.src = FACES[ch.key];
+}
+// 贴到场上已有的坏人身上 + 刷新角色面板。data URI 解码也是异步的，所以两边都要能反复调用。
+function applyCastFaces() {
+  for (const e of enemies) {
+    if (!e.char.canvas) continue;                  // 还没解出来就先用程序底脸
+    setFaceTexture(e.rig.face, e.char.canvas);
+    e.rig.faceFit = e.char.fit;
+    e.rig.photoFace = true;                        // 有照片了就把 3D 鼻子收回去
+    applyFaceOpts(e.rig);
+  }
+  $('castA').src = CAST[0].avatar;
+  $('castB').src = CAST[1].avatar;
+  if (!player.heroFace) $('castMe').src = player.avatar;   // 主角照片加载好了就别用旧的程序脸盖回去
+}
+for (const ch of CAST) loadCastFace(ch);
+
+// ---- 主角主角的脸：也换成照片，这张要裁 ----
+// crop 是"占宽/占高/占短边"的三个比例。上一版凭感觉写了 fy .385 / side .76，
+// 结果把整张脸往下切：窗口中心落在 32.8% 高度，而真正的脸中心在 53%，
+// 于是贴片上半部分是背后的蓝椅子、下巴被切到边缘，看着就是"剪切有问题"。
+// 这次在图上打了 5% 的网格量：发际线 27%、眉毛 45%、鼻子下沿 65%、下巴 79%，
+// 左右耳朵在 18% 和 76% → 脸中心 (47%, 53%)，脸高约 52% 图高。
+// side .86（= 550px ≈ 1.24 倍脸高）留一点点头发和下巴，又不至于把会议室带进来。
+const HERO_CROP = { fx: .47, fy: .53, side: .86 };
+const HERO_FIT = { scale: 1.04, ox: 0, oy: 0, bright: 1.2, round: .3 };
+function loadHeroFace() {
+  if (!FACES.c) return;                       // 没塞照片就留着程序画的那张正派脸
+  const img = new Image();
+  img.onload = () => {
+    player.heroFace = fitFaceImage(img, HERO_FIT.round, true, HERO_CROP);
+    setFaceTexture(player.rig.face, player.heroFace);
+    player.rig.faceFit = HERO_FIT;
+    player.rig.photoFace = true;              // 照片脸要把 3D 鼻子收回去，不然锥体糊在嘴上
+    applyFaceOpts(player.rig);
+    player.avatar = player.heroFace.toDataURL('image/jpeg', .86);
+    $('castMe').src = player.avatar;          // 角色面板里那个"主角"的头像
+  };
+  img.src = FACES.c;
+}
+loadHeroFace();
+
+// 工具栏的 🎭 开面板、面板右上角的 ✕ 关面板。手机上没有 Esc 键，✕ 是唯一可靠的出口。
+// 面板要能用鼠标点（拖拽对位、关闭按钮），所以打开面板先把鼠标还给系统；
+// 关掉时正好在按钮的 click 里，属于用户手势，可以直接把锁定要回来。
+$('btnFace').addEventListener('click', () => {
+  $('facePanel').classList.toggle('hidden');
+  if (!$('facePanel').classList.contains('hidden')) unlockMouse();
+});
+$('btnCloseFace').addEventListener('click', () => {
+  $('facePanel').classList.add('hidden');
+  lockMouse();
+});
+
+$('btnFull').addEventListener('click', () => { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen(); });
+$('btnPay').addEventListener('click', () => {
+  const c = pick(CAST);                 // 手动收款随机挑一位演员当"付款人"
+  Sound.cash(); showPay(randi(200, 2600), c.full, c); addMoney(0, false);
+});
+
+// ---- 整蛊截图 ----
+function takeShot() {
+  const src = renderer.domElement;
+  const W = 1280, H = 720;
+  const [c, g] = cv(W, H);
+  const ar = src.width / src.height;
+  const sw = Math.min(src.width, src.height * ar), sh = Math.min(src.height, src.width / ar);
+  g.drawImage(src, (src.width - sw) / 2, (src.height - sh) / 2, sw, sh, 0, 0, W, H);
+  // 渐变遮罩
+  const gr = g.createLinearGradient(0, H - 260, 0, H); gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,.75)');
+  g.fillStyle = gr; g.fillRect(0, H - 260, W, 260);
+  // 收款卡片
+  const cx = 70, cy = H - 230, cw = 430, chh = 170;
+  g.fillStyle = 'rgba(12,16,22,.86)'; roundRect(g, cx, cy, cw, chh, 18); g.fill();
+  g.fillStyle = '#07c160'; roundRect(g, cx, cy, cw, 56, 18); g.fill();
+  g.fillStyle = '#fff'; g.font = 'bold 26px "PingFang SC","Microsoft YaHei",sans-serif'; g.textBaseline = 'middle';
+  g.fillText('收款到账', cx + 24, cy + 28);
+  g.fillStyle = '#ffd166'; g.font = '900 52px "PingFang SC",serif';
+  g.fillText('¥ ' + player.money.toFixed(2), cx + 24, cy + 100);
+  const paid = player.lastPaid || { name: CAST[0].full, canvas: CAST[0].canvas };
+  g.fillStyle = '#c9d3e4'; g.font = '22px "PingFang SC",sans-serif';
+  g.fillText('来自：' + paid.name + ' · 已教训 ' + player.ko + ' 次', cx + 24, cy + 144);
+  // 头像
+  g.save(); g.beginPath(); g.arc(W - 120, cy + 60, 52, 0, 7); g.clip();
+  if (paid.canvas) g.drawImage(paid.canvas, W - 172, cy + 8, 104, 104);
+  g.restore();
+  g.strokeStyle = '#07c160'; g.lineWidth = 4; g.beginPath(); g.arc(W - 120, cy + 60, 54, 0, 7); g.stroke();
+  g.fillStyle = 'rgba(255,255,255,.55)'; g.font = '18px sans-serif'; g.textAlign = 'right';
+  g.fillText(new Date().toLocaleString('zh-CN', { hour12: false }), W - 40, 40);
+  const a = document.createElement('a');
+  a.download = '整蛊截图_' + Date.now() + '.png';
+  a.href = c.toDataURL('image/png'); a.click();
+}
+$('btnShot').addEventListener('click', takeShot);
+
+// ---------------------------------------------------------------- 13. 主循环
+let started = false, perf = 0, last = performance.now();
+let lastMoneyTxt = '', lastHintTxt = '';
+function loop(now) {
+  requestAnimationFrame(loop);
+  const raw = Math.min(.05, (now - last) / 1000); last = now;
+  // 命中停顿只压玩法时间，UI 计时（弹窗、白闪）继续走真实时间
+  let dt = raw;
+  if (hitStop > 0) { hitStop -= raw; dt = raw * .06; }
+  perf += dt;
+  if (started) {
+    updatePlayer(dt);
+    for (let i = enemies.length - 1; i >= 0; i--) if (!enemies[i].dead) updateEnemy(enemies[i], dt);
+    // 只补演员表里缺席的那位，不会再冒出随机的第三个路人
+    for (let i = 0; i < CAST.length; i++) {
+      if (perf > castBack[i] && !enemies.some(e => e.ci === i)) spawnEnemy(i);
+    }
+    updateFx(dt);
+    updateCamera(dt);
+    // HUD（只在文本变化时写 DOM）
+    player.moneyShown = damp(player.moneyShown, player.money, 8, dt);
+    const mt = player.moneyShown.toFixed(2);
+    if (mt !== lastMoneyTxt) { lastMoneyTxt = mt; $('moneyValue').textContent = mt; }
+    const lock = nearestEnemy(3.4);
+    updateTargetBar(lock);
+    // 提示语要跟着输入方式走：给手机写"点鼠标左键"等于没写
+    const ht = (!isTouch && lockUsable() && !locked)
+      ? '点击画面接管鼠标 · 移动鼠标转镜头 · 左键正踹 / 右键回旋 · 按 Esc 才能点顶部按钮'
+      : lock
+      ? (isTouch ? '距离很近 —— 点一下画面出脚，右下角"回旋"威力更大' : '距离很近 —— 左键出脚，右键回旋踢威力更大')
+      : (enemies.length
+        ? (isTouch ? '左下按住拖 = 走位（镜头会慢慢跟到正面）· 拖画面 = 转视角 · 两指捏 = 拉近拉远' : '靠近坏人会自动锁定，按住拖动把他放在画面中间')
+        : '正在等待下一个坏人出现…');
+    if (ht !== lastHintTxt) { lastHintTxt = ht; $('hint').textContent = ht; }
+    if (payTimer > 0) { payTimer -= raw; if (payTimer <= 0) $('payPopup').classList.remove('show'); }
+    if (flashT > 0) { flashT = Math.max(0, flashT - raw * 3); $('flash').style.opacity = flashT; $('flash').style.background = flashColor; }
+  } else {
+    // 待机镜头缓慢环绕
+    camYaw += raw * .12;
+    if (!camHold) updateCamera(raw);
+  }
+  updateTags();
+  renderer.render(scene, camera);
+}
+requestAnimationFrame(loop);
+
+// 尺寸变了要同时干三件事：画布重设、宽高比重设、按方向重设视角。
+// 竖屏（手机拿着）时 58° 会把坏人怼成一整张脸，所以放宽到 70° 并把镜头推远 .55m；
+// 一横过来就恢复桌面那套。orientationchange 之后 iOS 要等一帧才报出新 innerWidth，所以补一次延时。
+function resizeNow() {
+  syncUiClass();
+  // 直接读刚写好的 class，保证"CSS 用的手机版"和"镜头用的竖屏视角"是同一套判断
+  const w = innerWidth, h = innerHeight;
+  const p = document.documentElement.classList.contains('touch') && isPortrait();
+  camera.aspect = w / h;
+  baseFov = p ? 70 : 58;
+  distBias = p ? .55 : 0;
+  camera.fov = baseFov;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+}
+addEventListener('resize', resizeNow);
+addEventListener('orientationchange', () => { resizeNow(); setTimeout(resizeNow, 260); });
+resizeNow();
+
+/* 调试出口：在浏览器控制台里可以直接改内部状态、逐帧预览动作，方便调姿势。
+   例如 __dbg.kick(0.4) 看踢击中段，__dbg.goon('kneel', 0.5) 看跪地，__dbg.resume() 回到游戏。 */
+window.__dbg = {
+  THREE, scene, camera, player, enemies, KICKS, CAST, FACES, spawnEnemy, tryKick, addMoney, showPay, Sound, renderer,
+  spawnDust, spawnBill, spawnPop, fx,          // 特效也要能手动放，不然没法截图验证
+  // 贴图/名牌相关，方便在控制台里验证
+  fitFaceImage, findFaceRect, applyCastFaces, setNameTag,
+  freeze() { started = false; },
+  resume() { started = true; },
+  // 手动推进若干帧（页面在后台时 rAF 不跑，靠这个把状态机往前推）
+  step(dt = 1 / 60, n = 1) {
+    started = false;
+    for (let i = 0; i < n; i++) {
+      let d = dt;
+      if (hitStop > 0) { hitStop -= dt; d = dt * .06; }
+      perf += d;
+      updatePlayer(d);
+      for (let j = enemies.length - 1; j >= 0; j--) if (!enemies[j].dead) updateEnemy(enemies[j], d);
+      updateFx(d);
+      if (!camHold) updateCamera(d);
+      updateTags();
+      player.moneyShown = damp(player.moneyShown, player.money, 8, d);
+      $('moneyValue').textContent = player.moneyShown.toFixed(2);
+      if (payTimer > 0) { payTimer -= d; if (payTimer <= 0) $('payPopup').classList.remove('show'); }
+    }
+    return 'step ' + n;
+  },
+  kick(ph, kind = 'front') { started = false; applyPose(player.rig, kickPose(kind, ph)); },
+  goon(state, t = 0, dist = 1.3) {
+    started = false;
+    const e = enemies[0]; if (!e) return 'no enemy';
+    e.state = state; e.t = t;
+    const dx = Math.sin(player.yaw), dz = Math.cos(player.yaw);
+    e.pos.set(player.pos.x + dx * dist, 0, player.pos.z + dz * dist);
+    e.yaw = player.yaw + Math.PI;
+    const fn = { down: fallPose, kneel: kneelPose, pay: payPose, hurt: x => hurtPose(x, 1), stagger: staggerPose, panic: x => panicPose(x, e.type.belly), taunt: x => tauntPose(x, e.type.belly), back: x => walkPose(x * 4.0, .8), idle: x => idlePose(x) }[state];
+    applyPose(e.rig, fn(t));
+    e.rig.root.position.copy(e.pos);
+    e.rig.root.rotation.y = e.yaw;
+    const k = state === 'down' ? smooth(clamp(t / .45, 0, 1)) : 0;
+    e.rig.root.rotation.x = state === 'down' ? -1.50 * k : 0;
+    e.rig.root.position.y = state === 'down' ? .10 * e.rig.s * k : 0;
+    e.rig.root.updateMatrixWorld(true);
+    return state + ' t=' + t;
+  },
+  cam(px, py, pz, tx, ty, tz) {
+    camHold = true;
+    camera.position.set(px, py, pz);
+    camera.lookAt(tx, ty, tz);
+    camera.fov = 58; camera.updateProjectionMatrix();
+  },
+  unhold() { camHold = false; },
+  // 鼠标锁定 / 镜头偏转的调试出口：无头或后台标签页拿不到 pointer lock 时，
+  // 可以用 __dbg.lookBy(120, 0) 直接验证"移动鼠标 = 转镜头"的系数和符号。
+  // 名字不能叫 look —— 上面已经有 look(yaw,pitch,dist) 是绝对设定，同名会被后写的覆盖。
+  lookBy(dx, dy, k) { lookDelta(dx, dy, k); return [camYaw, camPitch]; },
+  get camYaw() { return camYaw; },
+  get camAuto() { return camAuto; },
+  lock: lockMouse, unlock: unlockMouse,
+  get locked() { return locked; },
+  get lockFails() { return lockFails; },
+  get camState() { return { camYaw, camAuto, camPitch, camDist }; },
+  // 改跟随镜头的角度（不钉住摄像机时用）
+  look(yaw, pitch, dist) {
+    if (yaw !== undefined) camYaw = yaw;
+    if (pitch !== undefined) camPitch = pitch;
+    if (dist !== undefined) camDist = dist;
+    return [camYaw, camPitch, camDist];
+  },
+  render() { renderer.render(scene, camera); },
+  // 手动渲染一帧并导出小图（页面在后台时 rAF 会停，这个可以在任何时刻拿到画面）
+  shot(w = 700, q = .72) {
+    renderer.render(scene, camera);
+    const src = renderer.domElement, o = document.createElement('canvas');
+    o.width = w; o.height = Math.round(w * src.height / src.width);
+    o.getContext('2d').drawImage(src, 0, 0, o.width, o.height);
+    return o.toDataURL('image/jpeg', q);
+  }
+};
+
+// ---------------------------------------------------------------- 14. 启动
+function boot() {
+  if (started) return;                       // 按钮还在焦点上时按空格会二次触发
+  document.activeElement && document.activeElement.blur();
+  Sound.init();
+  $('start').classList.add('hidden');
+  $('hud').classList.remove('hidden');
+  $('toolbar').classList.remove('hidden');
+  started = true;
+  camYaw = player.yaw;
+  spawnEnemy(0); spawnEnemy(1);        // 两位演员按站位进场：0 站左边、1 站右边。不用 setTimeout，后台标签页会把定时器拖慢
+  spawnPop('开踢！', '#7ef0b0', player.pos.clone().setY(2.4), 1.2);
+  // 点"进入游戏"本身就是一次用户手势，趁这次机会把鼠标锁定要过来；
+  // 万一被拒绝，下面的提示语会自动变成"点击画面接管鼠标"。
+  lockMouse();
+}
+$('btnStart').addEventListener('click', boot);
+// 名字和照片都写死在代码里，所以这里不再有"恢复存档"那一段：
+// 每次打开都是同一出戏，以前存进 localStorage 的 faceRaw / victimName 直接作废，不用读。
+</script>
+</body>
+</html>

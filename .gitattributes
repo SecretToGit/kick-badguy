@@ -1,0 +1,3 @@
+# 保持字节完全一致：index.html 是和线上部署文件逐字节比对过的，
+# 不让 core.autocrlf 把 LF 改成 CRLF
+* -text
